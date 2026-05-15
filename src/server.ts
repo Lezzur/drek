@@ -3,6 +3,7 @@ import { logger as honoLogger } from 'hono/logger';
 import { logger } from './logger.js';
 import health from './routes/health.js';
 import models from './routes/models.js';
+import dashboard from './routes/dashboard.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -30,6 +31,7 @@ export function createApp(): Hono {
 
   app.route('/', health);
   app.route('/', models);
+  app.route('/', dashboard);
 
   return app;
 }

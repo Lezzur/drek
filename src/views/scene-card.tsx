@@ -23,15 +23,6 @@ export interface SceneCardProps {
   isLast: boolean;
 }
 
-const editableSimpleFields: Array<keyof Scene> = [
-  'title',
-  'description',
-  'framingNotes',
-  'script',
-  'pacingNotes',
-  'transitionNote',
-];
-
 function asString(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v);
 }
@@ -63,35 +54,53 @@ const EditorTextarea: FC<{
   );
 };
 
+const FIELD_LABELS: Partial<Record<keyof Scene, string>> = {
+  title: 'Title',
+  framingNotes: 'Framing',
+  description: 'Description',
+  script: 'Script (spoken)',
+  pacingNotes: 'Pacing notes',
+  transitionNote: 'Transition to next',
+};
+
+const FIELD_ROWS: Partial<Record<keyof Scene, number>> = {
+  title: 1,
+  framingNotes: 2,
+  description: 3,
+  script: 6,
+  pacingNotes: 2,
+  transitionNote: 2,
+};
+
 const ClickableField: FC<{
   planId: string;
   scene: Scene;
   field: keyof Scene;
   label: string;
-  display?: string;
   rows?: number;
   inEdit: boolean;
-}> = ({ planId, scene, field, label, display, rows, inEdit }) => {
-  const value = display ?? asString(scene[field]);
+  valueClass?: string;
+}> = ({ planId, scene, field, label, rows, inEdit, valueClass }) => {
+  const value = asString(scene[field]);
   if (inEdit) {
     return (
-      <div style="margin-bottom:10px;">
-        <div class="muted" style="font-size:12px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">{label}</div>
+      <div class="field-block">
+        <div class="field-label">{label}</div>
         <EditorTextarea planId={planId} scene={scene} field={field} rows={rows} />
       </div>
     );
   }
   return (
     <div
-      style="margin-bottom:10px; cursor:pointer;"
+      class="field-block"
       hx-get={`/plans/${planId}/scenes/${scene.id}/edit?field=${field as string}`}
       hx-target={`#scene-${scene.id}`}
       hx-swap="outerHTML"
     >
-      <div class="muted" style="font-size:12px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">
-        {label}
+      <div class="field-label">{label}</div>
+      <div class={`field-value${valueClass ? ` ${valueClass}` : ''}`}>
+        {value || <span class="field-empty">(empty — click to add)</span>}
       </div>
-      <div style="white-space:pre-wrap;">{value || <span class="muted">(empty — click to add)</span>}</div>
     </div>
   );
 };
@@ -104,11 +113,11 @@ export const SceneCard: FC<SceneCardProps> = ({
   isLast,
 }) => {
   return (
-    <div id={`scene-${scene.id}`} class="card" style="display:flex; gap:16px;">
-      <div style="display:flex; flex-direction:column; align-items:center; gap:6px; min-width:48px;">
-        <div style="font-weight:600; font-size:18px;">#{scene.order}</div>
+    <div id={`scene-${scene.id}`} class="scene-card">
+      <div class="scene-col-left">
+        <div class="scene-num">#{scene.order}</div>
         <button
-          class="btn small linkish"
+          class="btn small secondary"
           type="button"
           disabled={isFirst}
           hx-post={`/plans/${planId}/scenes/${scene.id}/move-up`}
@@ -119,7 +128,7 @@ export const SceneCard: FC<SceneCardProps> = ({
           ▲
         </button>
         <button
-          class="btn small linkish"
+          class="btn small secondary"
           type="button"
           disabled={isLast}
           hx-post={`/plans/${planId}/scenes/${scene.id}/move-down`}
@@ -129,72 +138,73 @@ export const SceneCard: FC<SceneCardProps> = ({
         >
           ▼
         </button>
-        <div class="muted" style="font-size:12px;">{scene.estimatedDurationSeconds}s</div>
+        <div class="scene-dur">{scene.estimatedDurationSeconds}s</div>
       </div>
 
-      <div style="flex:1;">
+      <div>
         <ClickableField
           planId={planId}
           scene={scene}
           field="title"
-          label="Title"
-          rows={1}
+          label={FIELD_LABELS.title!}
+          rows={FIELD_ROWS.title}
           inEdit={editField === 'title'}
+          valueClass="title-value"
         />
         <ClickableField
           planId={planId}
           scene={scene}
           field="framingNotes"
-          label="Framing"
-          rows={2}
+          label={FIELD_LABELS.framingNotes!}
+          rows={FIELD_ROWS.framingNotes}
           inEdit={editField === 'framingNotes'}
         />
         <ClickableField
           planId={planId}
           scene={scene}
           field="description"
-          label="Description"
-          rows={3}
+          label={FIELD_LABELS.description!}
+          rows={FIELD_ROWS.description}
           inEdit={editField === 'description'}
         />
         <ClickableField
           planId={planId}
           scene={scene}
           field="script"
-          label="Script (spoken)"
-          rows={6}
+          label={FIELD_LABELS.script!}
+          rows={FIELD_ROWS.script}
           inEdit={editField === 'script'}
+          valueClass="script-value"
         />
         <ClickableField
           planId={planId}
           scene={scene}
           field="pacingNotes"
-          label="Pacing notes"
-          rows={2}
+          label={FIELD_LABELS.pacingNotes!}
+          rows={FIELD_ROWS.pacingNotes}
           inEdit={editField === 'pacingNotes'}
         />
         <ClickableField
           planId={planId}
           scene={scene}
           field="transitionNote"
-          label="Transition to next"
-          rows={2}
+          label={FIELD_LABELS.transitionNote!}
+          rows={FIELD_ROWS.transitionNote}
           inEdit={editField === 'transitionNote'}
         />
         {scene.projectRef ? (
-          <div class="muted" style="font-size:13px;">Featuring project: <strong>{scene.projectRef}</strong></div>
+          <div class="scene-project-ref">project: <code>{scene.projectRef}</code></div>
         ) : null}
       </div>
 
-      <div>
+      <div style="padding-top:2px;">
         <button
-          class="btn small danger"
+          class="btn-delete-scene"
           type="button"
           hx-delete={`/plans/${planId}/scenes/${scene.id}`}
           hx-target="#scene-list"
           hx-swap="outerHTML"
           hx-confirm="Delete this scene? Remaining scenes will renumber."
-          title="Delete scene"
         >
           ✕
         </button>
@@ -218,7 +228,7 @@ export const SceneList: FC<{ planId: string; scenes: Scene[] }> = ({
         </div>
         <div style="margin-top:12px;">
           <button
-            class="btn secondary"
+            class="btn-add-scene"
             type="button"
             hx-post={`/plans/${planId}/scenes`}
             hx-target="#scene-list"
@@ -231,8 +241,6 @@ export const SceneList: FC<{ planId: string; scenes: Scene[] }> = ({
     );
   }
 
-  // Use a non-self-closing parent so we can wrap, but use SceneCard directly
-  // via list to keep JSX readable.
   return (
     <div id="scene-list">
       {scenes.map((s, i) => (
@@ -245,7 +253,7 @@ export const SceneList: FC<{ planId: string; scenes: Scene[] }> = ({
       ))}
       <div style="margin-top:12px;">
         <button
-          class="btn secondary"
+          class="btn-add-scene"
           type="button"
           hx-post={`/plans/${planId}/scenes`}
           hx-target="#scene-list"

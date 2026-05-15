@@ -38,20 +38,20 @@ export const NewCoverLetterPlanPage: FC<NewCoverLetterFormProps> = ({
         your projects, and generate scenes + scripts in Rick's voice.
       </p>
       {prefilled ? (
-        <div class="flash ok" style="margin-bottom:12px;">
+        <div class="flash ok">
           Pre-filled from available listing <strong>{prefilled.id}</strong>.
         </div>
       ) : null}
       <form method="post" action="/plans/new/cover-letter" class="card">
         <label style="display:block; margin-bottom:14px;">
-          <div style="font-weight:600; margin-bottom:4px;">Plan title</div>
+          <div class="field-label" style="margin-bottom:6px;">Plan title</div>
           <input
             type="text"
             name="title"
             value={v.title}
             required
             placeholder="e.g. Senior Backend Eng at Acme"
-            style="width:100%; padding:8px; font-size:14px;"
+            style="width:100%;"
           />
           <div class="muted" style="font-size:12px; margin-top:4px;">
             Shown in the dashboard. Usually <em>role at company</em>.
@@ -59,7 +59,7 @@ export const NewCoverLetterPlanPage: FC<NewCoverLetterFormProps> = ({
         </label>
 
         <label style="display:block; margin-bottom:14px;">
-          <div style="font-weight:600; margin-bottom:4px;">Listing text *</div>
+          <div class="field-label" style="margin-bottom:6px;">Listing text *</div>
           <textarea
             name="sourceListingText"
             rows={12}
@@ -69,7 +69,7 @@ export const NewCoverLetterPlanPage: FC<NewCoverLetterFormProps> = ({
         </label>
 
         <label style="display:block; margin-bottom:14px;">
-          <div style="font-weight:600; margin-bottom:4px;">Target runtime (seconds)</div>
+          <div class="field-label" style="margin-bottom:6px;">Target runtime (seconds)</div>
           <input
             type="number"
             name="targetRuntimeSeconds"
@@ -84,7 +84,7 @@ export const NewCoverLetterPlanPage: FC<NewCoverLetterFormProps> = ({
         </label>
 
         <label style="display:block; margin-bottom:14px;">
-          <div style="font-weight:600; margin-bottom:4px;">Your constraints (optional)</div>
+          <div class="field-label" style="margin-bottom:6px;">Your constraints (optional)</div>
           <textarea
             name="userConstraints"
             rows={3}
@@ -129,19 +129,19 @@ export const NewYoutubePlanPage: FC<NewYoutubeFormProps> = ({ values, error }) =
       </p>
       <form method="post" action="/plans/new/youtube" class="card">
         <label style="display:block; margin-bottom:14px;">
-          <div style="font-weight:600; margin-bottom:4px;">Topic / title *</div>
+          <div class="field-label" style="margin-bottom:6px;">Topic / title *</div>
           <input
             type="text"
             name="title"
             value={v.title}
             required
             placeholder="e.g. How I built a lead pipeline that auto-routes inbound leads"
-            style="width:100%; padding:8px; font-size:14px;"
+            style="width:100%;"
           />
         </label>
 
         <label style="display:block; margin-bottom:14px;">
-          <div style="font-weight:600; margin-bottom:4px;">Target runtime (seconds)</div>
+          <div class="field-label" style="margin-bottom:6px;">Target runtime (seconds)</div>
           <input
             type="number"
             name="targetRuntimeSeconds"
@@ -156,7 +156,7 @@ export const NewYoutubePlanPage: FC<NewYoutubeFormProps> = ({ values, error }) =
         </label>
 
         <label style="display:block; margin-bottom:14px;">
-          <div style="font-weight:600; margin-bottom:4px;">Angle / constraints (optional)</div>
+          <div class="field-label" style="margin-bottom:6px;">Angle / constraints (optional)</div>
           <textarea
             name="userConstraints"
             rows={4}

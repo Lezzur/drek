@@ -25,106 +25,126 @@ export interface ShootInstructionsProps {
 }
 
 const STYLES = `
-* { box-sizing: border-box; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 18px;
   line-height: 1.6;
   color: #1a1a1a;
-  background: #fafafa;
-  margin: 0;
+  background: #fafaf7;
 }
-main { max-width: 880px; margin: 0 auto; padding: 32px; }
-h1 { font-size: 28px; margin-top: 0; }
-h2 { font-size: 22px; margin: 32px 0 8px 0; }
+main { max-width: 880px; margin: 0 auto; padding: 40px 32px; }
+h1 { font-size: 36px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 8px; }
 .bar {
   background: #1a1a1a;
-  color: #fafafa;
-  padding: 12px 32px;
+  color: #fafaf7;
+  padding: 12px 24px;
   display: flex;
-  gap: 12px;
   align-items: center;
+  gap: 12px;
 }
 .bar a, .bar button {
   background: transparent;
-  color: #fafafa;
-  border: 1px solid #fafafa;
-  padding: 6px 14px;
-  border-radius: 4px;
+  color: #fafaf7;
+  border: 1px solid rgba(255,255,255,0.4);
+  padding: 7px 14px;
+  border-radius: 6px;
   font-size: 14px;
   cursor: pointer;
   text-decoration: none;
+  font-family: inherit;
 }
-.bar a:hover, .bar button:hover { background: #fafafa; color: #1a1a1a; }
+.bar a:hover, .bar button:hover { background: rgba(255,255,255,0.1); text-decoration: none; }
 .bar .spacer { flex: 1; }
-.meta { color: #555; font-size: 15px; margin-bottom: 24px; }
-.scene {
+.meta {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 6px 16px;
+  font-size: 15px;
+  color: #555;
+  margin-bottom: 36px;
+  padding: 16px 20px;
   background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  padding: 24px;
-  margin-bottom: 20px;
+  border: 1px solid #e8e6e0;
+  border-radius: 10px;
+}
+.meta-label { color: #9a9a9a; font-size: 13px; font-weight: 500; }
+.scene {
+  margin-bottom: 40px;
   page-break-inside: avoid;
 }
-.scene-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
-.scene-num { font-size: 28px; font-weight: 700; color: #1a5fb4; }
-.scene-title { font-size: 22px; font-weight: 600; flex: 1; }
-.scene-dur { color: #666; font-size: 15px; }
+.scene-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 16px; }
+.scene-num { font-size: 48px; font-weight: 700; color: #1a5fb4; line-height: 1; font-variant-numeric: tabular-nums; }
+.scene-title { font-size: 24px; font-weight: 600; flex: 1; }
+.scene-dur { color: #6b6b6b; font-size: 14px; }
 .framing {
-  background: #f4f4f4;
+  background: #f1f6fc;
   border-left: 4px solid #1a5fb4;
-  padding: 10px 14px;
-  margin-bottom: 14px;
+  padding: 12px 16px;
+  border-radius: 0 6px 6px 0;
   font-size: 15px;
+  color: #3a3a3a;
+  margin-bottom: 20px;
 }
 .framing-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #666;
+  color: #6b6b6b;
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
-.script { font-size: 19px; line-height: 1.7; white-space: pre-wrap; }
+.script {
+  font-size: 19px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  max-width: 65ch;
+  color: #1a1a1a;
+  margin-bottom: 16px;
+}
+.pacing {
+  background: #fdf6e4;
+  border-left: 4px solid #7a4d00;
+  padding: 10px 14px;
+  border-radius: 0 6px 6px 0;
+  font-size: 14px;
+  color: #7a4d00;
+  margin-top: 14px;
+}
 .transition {
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px dashed #ccc;
-  font-size: 14px;
-  color: #666;
+  border-top: 1px dashed #d4d2cc;
+  font-size: 13px;
+  color: #3a3a3a;
   font-style: italic;
 }
-.pacing {
-  margin-top: 10px;
-  padding: 8px 12px;
-  background: #fff5dc;
-  border-left: 3px solid #d4b75b;
-  font-size: 14px;
+.stale-banner {
+  background: #fdf2dd;
+  border: 1px solid #e8d4a0;
+  color: #7a4d00;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
 }
 .runtime-summary {
   background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  padding: 20px;
-  margin-top: 24px;
-  font-size: 17px;
-  text-align: center;
-  font-weight: 600;
+  border: 1px solid #e8e6e0;
+  border-radius: 10px;
+  padding: 20px 24px;
+  margin-top: 40px;
+  font-size: 16px;
 }
-.stale-banner {
-  background: #fff5dc;
-  border: 1px solid #d4b75b;
-  color: #6a4c00;
-  padding: 12px 16px;
-  border-radius: 4px;
-  margin: 0 0 16px 0;
-}
+.runtime-summary h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6b6b; margin-bottom: 12px; }
+.runtime-list { list-style: none; margin-top: 8px; }
+.runtime-list li { font-size: 14px; color: #6b6b6b; padding: 4px 0; font-variant-numeric: tabular-nums; }
+.runtime-total { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
 @media print {
   .bar, .stale-banner { display: none !important; }
   body { background: #fff; font-size: 16px; }
   main { padding: 0; }
-  .scene { box-shadow: none; border: 1px solid #999; }
+  .scene { page-break-inside: avoid; }
 }
 `;
 
@@ -162,16 +182,12 @@ export const ShootInstructionsPage: FC<ShootInstructionsProps> = ({
           ) : null}
           <h1>{plan.title}</h1>
           <div class="meta">
-            <div>
-              <strong>Type:</strong> {plan.type === 'cover_letter' ? 'Cover letter' : 'YouTube'}
-            </div>
-            <div>
-              <strong>Target runtime:</strong> {plan.targetRuntimeSeconds}s (estimated{' '}
-              {totalEst}s)
-            </div>
-            <div>
-              <strong>Audience:</strong> {audience}
-            </div>
+            <span class="meta-label">Type</span>
+            <span>{plan.type === 'cover_letter' ? 'Cover letter' : 'YouTube'}</span>
+            <span class="meta-label">Runtime</span>
+            <span>{totalEst}s estimated · target {plan.targetRuntimeSeconds}s</span>
+            <span class="meta-label">Audience</span>
+            <span>{audience}</span>
           </div>
 
           {scenes.map((s) => (
@@ -179,7 +195,13 @@ export const ShootInstructionsPage: FC<ShootInstructionsProps> = ({
           ))}
 
           <div class="runtime-summary">
-            Total estimated runtime: {totalEst}s · Target: {plan.targetRuntimeSeconds}s
+            <h3>Runtime summary</h3>
+            <div class="runtime-total">Total: {totalEst}s estimated · Target: {plan.targetRuntimeSeconds}s</div>
+            <ul class="runtime-list">
+              {scenes.map((s) => (
+                <li>Scene {s.order} · {s.title} — {s.estimatedDurationSeconds}s</li>
+              ))}
+            </ul>
           </div>
         </main>
       </body>

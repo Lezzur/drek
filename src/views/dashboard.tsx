@@ -33,29 +33,32 @@ function formatDate(d: Date): string {
 
 const FilterBar: FC<{ filter: DashboardProps['filter'] }> = ({ filter }) => {
   return (
-    <form method="get" action="/" class="row" style="margin-bottom:16px; flex-wrap: wrap;">
-      <label class="row" style="gap:6px;">
-        <span class="muted">Type</span>
-        <select name="type">
-          <option value="" selected={!filter.type}>All</option>
-          <option value="cover_letter" selected={filter.type === 'cover_letter'}>Cover letter</option>
-          <option value="youtube" selected={filter.type === 'youtube'}>YouTube</option>
-        </select>
-      </label>
-      <label class="row" style="gap:6px;">
-        <span class="muted">Status</span>
-        <select name="status">
-          <option value="" selected={!filter.status}>All</option>
-          {(Object.keys(STATUS_LABELS) as PlanStatus[]).map((s) => (
-            <option value={s} selected={filter.status === s}>{STATUS_LABELS[s]}</option>
-          ))}
-        </select>
-      </label>
-      <button class="btn small secondary" type="submit">Filter</button>
-      {(filter.type || filter.status) ? (
-        <a class="btn small linkish" href="/">Clear</a>
-      ) : null}
-    </form>
+    <div class="card" style="margin-bottom:16px;">
+      <h3 class="section-label">Filter</h3>
+      <form method="get" action="/" class="row" style="flex-wrap: wrap;">
+        <label class="row" style="gap:6px;">
+          <span class="muted">Type</span>
+          <select name="type">
+            <option value="" selected={!filter.type}>All</option>
+            <option value="cover_letter" selected={filter.type === 'cover_letter'}>Cover letter</option>
+            <option value="youtube" selected={filter.type === 'youtube'}>YouTube</option>
+          </select>
+        </label>
+        <label class="row" style="gap:6px;">
+          <span class="muted">Status</span>
+          <select name="status">
+            <option value="" selected={!filter.status}>All</option>
+            {(Object.keys(STATUS_LABELS) as PlanStatus[]).map((s) => (
+              <option value={s} selected={filter.status === s}>{STATUS_LABELS[s]}</option>
+            ))}
+          </select>
+        </label>
+        <button class="btn small secondary" type="submit">Filter</button>
+        {(filter.type || filter.status) ? (
+          <a class="btn small linkish" href="/">Clear</a>
+        ) : null}
+      </form>
+    </div>
   );
 };
 
@@ -69,45 +72,47 @@ const PlansTable: FC<{ plans: Plan[] }> = ({ plans }) => {
     );
   }
   return (
-    <table class="plans">
-      <thead>
-        <tr>
-          <th style="width:34%">Title</th>
-          <th>Type</th>
-          <th>Status</th>
-          <th>Runtime</th>
-          <th>Updated</th>
-          <th style="width:120px;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {plans.map((p) => (
+    <div class="card" style="padding:0; overflow:hidden; border-radius:10px;">
+      <table class="plans">
+        <thead>
           <tr>
-            <td>
-              <a href={`/plans/${p.id}`}>{p.title}</a>
-            </td>
-            <td><span class="muted">{p.type === 'cover_letter' ? 'Cover letter' : 'YouTube'}</span></td>
-            <td><span class={`badge ${p.status}`}>{STATUS_LABELS[p.status]}</span></td>
-            <td><span class="muted">{p.targetRuntimeSeconds}s</span></td>
-            <td><span class="muted">{formatDate(p.updatedAt)}</span></td>
-            <td>
-              {p.status === 'awaiting_review' ? (
-                <button
-                  class="btn small linkish"
-                  type="button"
-                  hx-post={`/plans/${p.id}/dismiss`}
-                  hx-target="closest tr"
-                  hx-swap="outerHTML"
-                  hx-confirm="Dismiss this listing? It will not be planned for video."
-                >
-                  Dismiss
-                </button>
-              ) : null}
-            </td>
+            <th style="width:34%">Title</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th class="col-runtime">Runtime</th>
+            <th>Updated</th>
+            <th style="width:120px;"></th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {plans.map((p) => (
+            <tr>
+              <td>
+                <a href={`/plans/${p.id}`} style="color:var(--link); font-weight:500;">{p.title}</a>
+              </td>
+              <td><span class="muted">{p.type === 'cover_letter' ? 'Cover letter' : 'YouTube'}</span></td>
+              <td><span class={`badge ${p.status}`}>{STATUS_LABELS[p.status]}</span></td>
+              <td class="col-runtime"><span class="muted">{p.targetRuntimeSeconds}s</span></td>
+              <td><span class="muted">{formatDate(p.updatedAt)}</span></td>
+              <td>
+                {p.status === 'awaiting_review' ? (
+                  <button
+                    class="btn small linkish"
+                    type="button"
+                    hx-post={`/plans/${p.id}/dismiss`}
+                    hx-target="closest tr"
+                    hx-swap="outerHTML"
+                    hx-confirm="Dismiss this listing? It will not be planned for video."
+                  >
+                    Dismiss
+                  </button>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 };
 
@@ -119,8 +124,8 @@ export const DashboardPage: FC<DashboardProps> = ({
 }) => {
   return (
     <Layout title="Dashboard" flash={flash}>
-      <div class="row" style="margin-bottom:16px;">
-        <h2 style="margin:0;">Video plans</h2>
+      <div class="row" style="margin-bottom:8px;">
+        <h1 style="margin:0;">Video plans</h1>
         <span class="spacer" />
         <button
           class="btn"
@@ -135,9 +140,7 @@ export const DashboardPage: FC<DashboardProps> = ({
         <a class="btn secondary" href="/plans/new/cover-letter">New cover letter</a>
         <a class="btn secondary" href="/plans/new/youtube">New YouTube</a>
       </div>
-      <div class="muted" style="margin-bottom:12px;">
-        Last poll: {lastPollAt ? formatDate(new Date(lastPollAt)) : 'never'}
-      </div>
+      <p class="muted" style="margin: 6px 0 16px;">Last poll: {lastPollAt ? formatDate(new Date(lastPollAt)) : 'never'}</p>
       <div id="poll-result" style="margin-bottom:12px;"></div>
       <FilterBar filter={filter} />
       <PlansTable plans={plans} />

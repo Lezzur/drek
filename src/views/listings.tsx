@@ -21,17 +21,16 @@ const ListingRow: FC<{ l: AvailableListing }> = ({ l }) => {
   const isSelected = Boolean(l.planId);
   return (
     <div class="card">
-      <div class="row" style="gap:12px;">
+      <div class="row" style="gap:12px; align-items:flex-start;">
         <div style="flex:1;">
-          <div style="font-weight:600; font-size:16px;">{l.title}</div>
-          <div class="muted" style="font-size:13px;">
-            {l.company ?? 'Unknown company'} ·{' '}
-            ingested {formatDate(l.receivedAt)}
+          <div style="font-size:16px;font-weight:600;">{l.title}</div>
+          <div class="muted" style="font-size:13px;margin-top:2px;">
+            {l.company ?? 'Unknown company'} · ingested {formatDate(l.receivedAt)}
             {isSelected ? ' · ' : null}
             {isSelected ? <span class="badge finalized">Selected</span> : null}
           </div>
           {l.summary ? (
-            <div style="font-size:14px; margin-top:8px; white-space:pre-wrap;">{l.summary}</div>
+            <p style="font-size:14px;color:var(--ink-2);margin:8px 0 0;">{l.summary}</p>
           ) : null}
         </div>
         <div>
@@ -51,16 +50,16 @@ const ListingRow: FC<{ l: AvailableListing }> = ({ l }) => {
 export const ListingsPage: FC<ListingsPageProps> = ({ listings, showAll }) => {
   return (
     <Layout title="Available listings">
-      <div class="row" style="margin-bottom:16px;">
-        <h2 style="margin:0;">Available listings</h2>
+      <div class="row" style="margin-bottom:8px;">
+        <h1 style="margin:0;">Available listings</h1>
         <span class="spacer" />
         {showAll ? (
-          <a class="btn small secondary" href="/listings">Show unselected only</a>
+          <a class="btn secondary" href="/listings">Show unselected only</a>
         ) : (
-          <a class="btn small secondary" href="/listings?all=1">Show all</a>
+          <a class="btn secondary" href="/listings?all=1">Show all</a>
         )}
       </div>
-      <p class="muted" style="margin-top:-8px;">
+      <p style="color:var(--ink-3);font-size:14px;max-width:720px;margin:8px 0 20px;">
         Listings PI ingested that DREK pulled from Neurocore. Use these
         when you want to plan a cover letter for a listing that wasn't
         automatically flagged as requiring video. Selecting a listing here

@@ -35,6 +35,21 @@ const envSchema = z.object({
   // your installed Codex CLI actually accepts.
   CODEX_BIN: z.string().min(1).default('codex'),
   CODEX_MODEL: z.string().min(1).default('gpt-5-codex'),
+
+  // --- Neurocore client (M2) ------------------------------------------------
+  // Base URL of the Neurocore HTTP service. Loopback by default since DREK is
+  // co-located with Neurocore on Rick's Windows host.
+  NEUROCORE_URL: z.string().url().default('http://localhost:3100'),
+
+  // Bearer token issued for DREK by Neurocore's /v1/admin/tokens endpoint.
+  // Required only when DREK actually talks to Neurocore — most unit tests
+  // mock the client, so we keep this optional and let the client throw a
+  // clear UNAUTHENTICATED error if it's missing at call time.
+  NEUROCORE_TOKEN: z.string().min(1).optional(),
+
+  // Wall-clock cap on a single Neurocore HTTP call. Single retry on top, so
+  // worst-case wait is ~2× this + 2s backoff.
+  NEUROCORE_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

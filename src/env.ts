@@ -15,6 +15,26 @@ const envSchema = z.object({
   GCP_PROJECT_ID: z.string().min(1, 'GCP_PROJECT_ID is required'),
 
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+
+  // --- LLM provider (M1) ----------------------------------------------------
+  // Active provider. Selected once at startup, application-wide.
+  LLM_PROVIDER: z.enum(['claude', 'codex']).default('claude'),
+
+  // Wall-clock cap on a single subprocess call. The four-step pipeline runs
+  // each step sequentially, so this is also the per-step timeout.
+  LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+
+  // Path/name of the Claude CLI binary. Defaults to `claude` (resolved via
+  // PATH). On Windows, point at the .cmd shim — the wrapper detects .cmd/.bat
+  // and routes via cmd.exe.
+  CLAUDE_BIN: z.string().min(1).default('claude'),
+  CLAUDE_MODEL: z.string().min(1).default('claude-sonnet-4-5'),
+
+  // Path/name of the Codex CLI binary plus its model. Same .cmd-shim handling
+  // as Claude. Default model is a placeholder — set CODEX_MODEL to whatever
+  // your installed Codex CLI actually accepts.
+  CODEX_BIN: z.string().min(1).default('codex'),
+  CODEX_MODEL: z.string().min(1).default('gpt-5-codex'),
 });
 
 export type Env = z.infer<typeof envSchema>;

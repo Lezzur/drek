@@ -6,6 +6,7 @@ import models from './routes/models.js';
 import dashboard from './routes/dashboard.js';
 import plan from './routes/plan.js';
 import scenes from './routes/scenes.js';
+import newPlan from './routes/new-plan.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -33,8 +34,10 @@ export function createApp(): Hono {
 
   app.route('/', health);
   app.route('/', models);
-  // Scene partials must be mounted BEFORE the plan page so the more-specific
-  // `/plans/:id/scenes/...` routes win the match against `/plans/:id`.
+  // New-plan forms must be mounted BEFORE plan detail so /plans/new/... beats
+  // the /plans/:id wildcard. Scene partials must come before plan detail for
+  // the same reason — more-specific paths win.
+  app.route('/', newPlan);
   app.route('/', scenes);
   app.route('/', plan);
   app.route('/', dashboard);

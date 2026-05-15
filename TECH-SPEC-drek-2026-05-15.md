@@ -125,20 +125,31 @@ interface LLMProvider {
 - **Responsibility:** HTTP client for all Neurocore API calls. Handles auth, retries, and graceful degradation.
 - **Technology:** Native `fetch` (Node 20 built-in). No HTTP client library needed.
 
+**Task type resolution:** The Neurocore client takes `planMode: 'cover_letter' | 'youtube'` and resolves the correct task type per call. Four task types defined in the gap spec:
+
+| Task Type | Plan Mode | Used For |
+|-----------|-----------|----------|
+| `videoPlanCoverLetter` | cover_letter | Project context + identity retrieval during planning |
+| `videoPlanYoutube` | youtube | Project context + identity retrieval during planning |
+| `scriptCoverLetter` | cover_letter | Voice profile retrieval during script writing |
+| `scriptYoutube` | youtube | Voice profile retrieval during script writing |
+
 **Calls made:**
 
-| Call | Neurocore Endpoint | Purpose | Gap |
-|------|-------------------|---------|-----|
-| `getProjectContext` | `POST /v1/memory/context` with `taskType: 'videoPlanning'` | Retrieve project data for requirement matching | Gap 1 |
-| `getVoiceProfile` | `POST /v1/memory/context` with `taskType: 'contentBrief'` | Retrieve spoken-voice profile for script generation | Gap 4 |
-| `getIdentity` | `POST /v1/memory/context` with `taskType: 'projectShowcase'` | Retrieve Rick's professional identity for intros/closings | Gap 1 |
-| `pollPendingSignals` | `GET /v1/signals/pending?appId=drek&since={timestamp}` | Poll for new PI listings | Gap 5 |
-| `ackSignals` | `POST /v1/signals/ack` | Mark consumed signals | Gap 5 |
+| Call | Neurocore Endpoint | Task Type | Purpose | Gap |
+|------|-------------------|-----------|---------|-----|
+| `getProjectContext(mode)` | `POST /v1/memory/context` | `videoPlanCoverLetter` or `videoPlanYoutube` | Retrieve project data + identity for requirement matching. Profile layer is included in all DREK task types per the gap spec's layer budget. | Gap 1 |
+| `getVoiceProfile(mode)` | `POST /v1/memory/context` | `scriptCoverLetter` or `scriptYoutube` | Retrieve spoken-voice profile for script generation | Gap 4 |
+| `pollPendingSignals` | `GET /v1/signals/pending?appId=drek&since={timestamp}` | N/A | Poll for new PI listings | Gap 5 |
+| `ackSignals` | `POST /v1/signals/ack` | N/A | Mark consumed signals | Gap 5 |
+| `sendApprovedScript` | `POST /v1/memory/signals` | N/A | Send finalized scripts to Neurocore as spoken-voice training data | Gap 4 |
+
+**Voice calibration feedback loop:** When a plan transitions to `finalized`, DREK sends the final edited scripts to Neurocore via `POST /v1/memory/signals` with `signalType: 'script.approved'` and payload `{ planId, planMode, scenes: [{ script, wasEdited }] }`. Neurocore ingests these as spoken-voice samples (layer `voice`, register `spoken`). After 3+ samples accumulate, Neurocore re-synthesizes the spoken-voice fingerprint. This is the calibration loop Rick described — no manual seed transcripts needed.
 
 **Auth:** Bearer token stored in `NEUROCORE_TOKEN` env var.
 
 **Graceful degradation:**
-- Neurocore unreachable → polling paused, project matching disabled (Rick selects projects manually), scripts use generic voice with warning displayed.
+- Neurocore unreachable → polling paused, project matching disabled (Rick selects projects manually), scripts use written-voice fallback with warning displayed.
 - Timeout: 10s per call, 1 retry with 2s backoff, then degrade.
 
 #### Component E: Polling Service
@@ -256,7 +267,7 @@ DREK is a server-rendered web app, not a headless API. Routes serve HTML pages a
 | POST | `/plans/:id/match` | Trigger project matching (LLM call) |
 | POST | `/plans/:id/generate` | Trigger scene + script generation (LLM call) |
 | POST | `/plans/:id/dismiss` | Set plan status to `dismissed` |
-| POST | `/plans/:id/finalize` | Set plan status to `finalized` |
+| POST | `/plans/:id/finalize` | Set plan status to `finalized`. Sends approved scripts to Neurocore via `sendApprovedScript` for voice calibration. |
 | POST | `/poll` | Manual "Check now" — trigger immediate Neurocore poll |
 | POST | `/listings/:id/select` | Create plan from available listing |
 
@@ -509,7 +520,7 @@ Single deploy. No canary, no feature flags, no staged rollout. This is a greenfi
 | 1 | DREK task types in injection profiles | ~30 min | None |
 | 2 | Project-status temporal cron | ~2-4 hours | None |
 | 3 | Narrative/demo-readiness metadata in crawl schema + re-crawl | ~1-2 hours | None |
-| 4 | Spoken-voice profile | ~2-3 hours | Gap 3 (needs narrative hooks in project data) |
+| 4 | Spoken-voice profile | ~2-3 hours | None (Phase 1 derives from written voice; Phase 2 calibrates from DREK script approvals) |
 | 5 | PI signal consumption endpoint | ~1-2 hours | None |
 
 **Recommended build order:** Gap 1 → Gap 3 + re-crawl → Gap 5 → Gap 4 → Gap 2.
@@ -524,7 +535,7 @@ Single deploy. No canary, no feature flags, no staged rollout. This is a greenfi
 | M3 | Data model + CRUD | Firestore collections (plans, scenes, available_listings, config), Zod schemas, create/read/update operations | M0 | ~3 hours |
 | M4 | Planning engine — requirement detection | Call 1 (requirement detection), LLM prompt + output parsing, plan status transition to `requirements_reviewed` | M1, M3 | ~3 hours |
 | M5 | Planning engine — project matching | Call 2 (project matching), Neurocore context query, LLM prompt + output parsing, plan status transition to `projects_matched` | M2, M4 | ~3 hours |
-| M6 | Planning engine — scene + script generation | Call 3 (scene generation) + Call 4 (script writing), composition rules injection, runtime calibration, plan status transition to `scenes_generated` | M5, Neurocore Gap 4 | ~4 hours |
+| M6 | Planning engine — scene + script generation | Call 3 (scene generation) + Call 4 (script writing), composition rules injection, runtime calibration, plan status transition to `scenes_generated`. Ships with written-voice fallback; spoken-voice profile improves quality as Gap 4 Phase 2 calibrates from Rick's edits. | M5 | ~4 hours |
 | M7 | Dashboard UI | Plan list page, filters (type, status), "Check now" button, new plan buttons, notification indicators, dismiss action | M3 | ~4 hours |
 | M8 | Plan detail + scene cards UI | Scene card display, HTMX reorder (move-up/down), inline edit (textarea on click, auto-save on blur), delete with confirmation, add scene, runtime bar | M6, M7 | ~6 hours |
 | M9 | Polling service | Background cron, Neurocore signal polling, plan creation from video-required listings, available_listings population, manual poll trigger, mutex | M2, M3 | ~3 hours |

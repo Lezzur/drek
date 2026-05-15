@@ -206,9 +206,78 @@ describe('NeurocoreClient — getProjectContext', () => {
     await client.getProjectContext({ planMode: 'youtube' });
     expect(fetchCalls[0]?.body).toMatchObject({ taskType: 'videoPlanYoutube' });
   });
+
+  it('passes contactId into scope when provided so Neurocore can inline listing insight', async () => {
+    queueResponse(
+      jsonResponse(200, {
+        systemBlock: '<listing_insight><fit_score>78</fit_score></listing_insight>',
+        metadata: {
+          layersIncluded: ['profile', 'listing_insight', 'projects'],
+          memoryRecordIds: [],
+          estimatedTokens: 200,
+          degraded: false,
+          budget: { requested: 4000, clampedTo: 4000, effective: 4000 },
+        },
+      }),
+    );
+    const client = new NeurocoreClient();
+    await client.getProjectContext({
+      planMode: 'cover_letter',
+      contactId: 'lst_42',
+      jobContextHint: 'react eng at acme',
+    });
+    expect(fetchCalls[0]?.body).toMatchObject({
+      taskType: 'videoPlanCoverLetter',
+      scope: { userId: 'rick', appId: 'drek', contactId: 'lst_42' },
+      jobContextHint: 'react eng at acme',
+    });
+  });
+
+  it('omits contactId from scope when not provided (manual YouTube plan)', async () => {
+    queueResponse(
+      jsonResponse(200, {
+        systemBlock: '',
+        metadata: {
+          layersIncluded: [],
+          memoryRecordIds: [],
+          estimatedTokens: 0,
+          degraded: false,
+          budget: { requested: 4000, clampedTo: 4000, effective: 4000 },
+        },
+      }),
+    );
+    const client = new NeurocoreClient();
+    await client.getProjectContext({ planMode: 'youtube' });
+    const scope = (fetchCalls[0]?.body as { scope?: Record<string, unknown> } | undefined)?.scope ?? {};
+    expect(scope).not.toHaveProperty('contactId');
+  });
 });
 
 describe('NeurocoreClient — getVoiceProfile', () => {
+  it('passes contactId into scope for script writing too', async () => {
+    queueResponse(
+      jsonResponse(200, {
+        systemBlock: '',
+        metadata: {
+          layersIncluded: ['voice', 'listing_insight'],
+          memoryRecordIds: [],
+          estimatedTokens: 100,
+          degraded: false,
+          budget: { requested: 4000, clampedTo: 4000, effective: 4000 },
+        },
+      }),
+    );
+    const client = new NeurocoreClient();
+    await client.getVoiceProfile({
+      planMode: 'cover_letter',
+      contactId: 'lst_99',
+    });
+    expect(fetchCalls[0]?.body).toMatchObject({
+      taskType: 'scriptCoverLetter',
+      scope: { userId: 'rick', appId: 'drek', contactId: 'lst_99' },
+    });
+  });
+
   it('routes to scriptCoverLetter / scriptYoutube based on mode', async () => {
     queueResponse(
       jsonResponse(200, {

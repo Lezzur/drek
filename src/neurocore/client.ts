@@ -60,9 +60,16 @@ export class NeurocoreClient {
    * Mode picks the injection-profile task type — videoPlanCoverLetter vs
    * videoPlanYoutube — which Neurocore uses to weight projects/voice and
    * cap maxTokens.
+   *
+   * When `contactId` is provided (which is the same as PI's listingId for
+   * listing-triggered plans), Neurocore inlines the per-listing fit-score
+   * insight (quickWins, redFlags, reasoning) into the systemBlock as a
+   * <listing_insight> XML block. Manual YouTube plans omit it — there's
+   * no listing context to load.
    */
   async getProjectContext(params: {
     planMode: PlanMode;
+    contactId?: string;
     jobContextHint?: string;
     tokenBudget?: number;
   }): Promise<MemoryContextResponse> {
@@ -70,7 +77,11 @@ export class NeurocoreClient {
       params.planMode === 'cover_letter' ? 'videoPlanCoverLetter' : 'videoPlanYoutube';
     return this.requestJson<MemoryContextResponse>('POST', '/v1/memory/context', {
       taskType,
-      scope: { userId: 'rick', appId: APP_ID },
+      scope: {
+        userId: 'rick',
+        appId: APP_ID,
+        ...(params.contactId ? { contactId: params.contactId } : {}),
+      },
       ...(params.jobContextHint ? { jobContextHint: params.jobContextHint } : {}),
       ...(params.tokenBudget !== undefined ? { tokenBudget: params.tokenBudget } : {}),
     });
@@ -81,9 +92,14 @@ export class NeurocoreClient {
    * the spoken-voice fingerprint Neurocore exposes once Gap 4 has had a
    * chance to populate it — until then, this returns whatever's in the
    * voice layer, which is the written voice (graceful degradation).
+   *
+   * Passing `contactId` here also pulls in the per-listing fit-score
+   * insight, which is useful for script writing too — quickWins inform
+   * what to emphasize, redFlags inform what to avoid.
    */
   async getVoiceProfile(params: {
     planMode: PlanMode;
+    contactId?: string;
     jobContextHint?: string;
     tokenBudget?: number;
   }): Promise<MemoryContextResponse> {
@@ -91,7 +107,11 @@ export class NeurocoreClient {
       params.planMode === 'cover_letter' ? 'scriptCoverLetter' : 'scriptYoutube';
     return this.requestJson<MemoryContextResponse>('POST', '/v1/memory/context', {
       taskType,
-      scope: { userId: 'rick', appId: APP_ID },
+      scope: {
+        userId: 'rick',
+        appId: APP_ID,
+        ...(params.contactId ? { contactId: params.contactId } : {}),
+      },
       ...(params.jobContextHint ? { jobContextHint: params.jobContextHint } : {}),
       ...(params.tokenBudget !== undefined ? { tokenBudget: params.tokenBudget } : {}),
     });

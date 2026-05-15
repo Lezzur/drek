@@ -13,7 +13,12 @@ Specs live next to the code:
 
 ## Stack
 
-TypeScript 5 · Node 20 · Hono 4 · Firestore · Claude CLI / Codex CLI · pm2
+TypeScript 5 · Node 20 · Hono 4 · Firestore · Claude CLI / Codex CLI · NSSM
+(Windows Service)
+
+DREK runs on the same Windows host as PI and Neurocore — co-located so every
+inter-service call is localhost. NSSM wraps the Node process as a Windows
+service (no pm2; PI hit ghost-process and port-lock issues on Windows).
 
 DREK is a Neurocore consumer. It does not talk to PI directly — all PI signals
 flow through Neurocore as the hub-and-spoke pattern (Discovery D-3).
@@ -49,12 +54,20 @@ src/
 
 Health check: `curl http://localhost:3003/healthz`
 
-## Production
+## Production (Windows + NSSM)
 
-pm2 ecosystem config in `ecosystem.config.js`. Co-located with Neurocore + PI
-on the same VPS — localhost calls between services.
-
-```bash
+```powershell
+# One-time: install nssm.exe on PATH (e.g., via choco install nssm or manual).
+# Then, from a PowerShell run as Administrator:
+cd F:\claude-code\claude_projects\drek
+npm install
 npm run build
-pm2 start ecosystem.config.js
+.\scripts\nssm-setup.ps1
 ```
+
+`scripts/nssm-setup.ps1` registers DREK as a Windows service named `DREK`,
+points it at `dist/index.js`, rotates logs at 10 MB into `logs/`, and tails the
+health endpoint to confirm it's up. Re-running the script tears down and
+reinstalls the service — safe to run after each `npm run build`.
+
+For dev iteration use `npm run dev` interactively, not the service.

@@ -91,7 +91,7 @@ DREK is a standalone TypeScript web service that automates video pre-production 
 - **Responsibility:** Route handling, HTML rendering, HTMX partial responses, static asset serving.
 - **Technology:** Hono 4.x on `@hono/node-server`. TypeScript 5.x. Node.js 20.x LTS.
 - **Rendering:** Server-side HTML via JSX (Hono's built-in JSX support) or template literals. No client-side framework. HTMX 2.x loaded from a vendored JS file for dynamic interactions.
-- **Scaling:** Single instance. pm2 for process management and auto-restart.
+- **Scaling:** Single instance. NSSM for process management and auto-restart.
 
 #### Component B: Planning Engine
 
@@ -383,7 +383,7 @@ Hono 4.x + HTMX + four-step LLM pipeline. Maximizes Rick's control over the plan
 - **Data protection:** Plan and scene data stored in Firestore (Google-managed encryption at rest). No PII beyond Rick's professional information (already in Neurocore). Service account key stored as env var, not committed.
 - **Input validation:** All form inputs validated server-side with Zod schemas before processing. LLM prompts are constructed server-side from validated inputs — no user-supplied strings executed as code or injected into shell commands.
 - **CLI injection prevention:** LLM provider passes prompts via stdin to `child_process.spawn` (not `exec`). No shell interpolation. Binary path is a config constant, not user input.
-- **Secrets management:** Two secrets — `NEUROCORE_TOKEN` and `GOOGLE_APPLICATION_CREDENTIALS` (Firestore service account). Both env vars, managed via pm2 ecosystem config.
+- **Secrets management:** Two secrets — `NEUROCORE_TOKEN` and `GOOGLE_APPLICATION_CREDENTIALS` (Firestore service account). Both env vars, loaded from a gitignored `.env` file via `dotenv` at startup. NSSM picks up the env vars set in `AppEnvironmentExtra` (see `scripts/nssm-setup.ps1`) plus whatever `.env` adds.
 
 ## 7. Performance and Scalability
 
@@ -423,8 +423,8 @@ Hono 4.x + HTMX + four-step LLM pipeline. Maximizes Rick's control over the plan
 
 ### Process Management
 
-- pm2 manages the Node process. Auto-restart on crash. Max 3 restarts in 30s before stopping (prevents crash loops).
-- `setInterval`-based polling survives within-process restarts (pm2 restarts the full process, which re-initializes the interval).
+- NSSM manages the Node process. Auto-restart on crash. Max 3 restarts in 30s before stopping (prevents crash loops).
+- `setInterval`-based polling survives within-process restarts (NSSM restarts the full process, which re-initializes the interval).
 
 ## 9. Observability
 
@@ -475,31 +475,24 @@ No dedicated metrics infrastructure for v1 (single user, internal tool). Logs ar
 ### Infrastructure Setup
 
 1. Rick creates Firebase project `drek-prod` and generates service account key.
-2. Service account key stored as `GOOGLE_APPLICATION_CREDENTIALS` env var in pm2 ecosystem config.
-3. Neurocore app token for DREK stored as `NEUROCORE_TOKEN` env var.
-4. nginx config: new `server` block proxying `drek.localhost` (or port-based) to `127.0.0.1:PORT`.
+2. Service account key path stored in a `.env` file next to the build (loaded
+   by `dotenv` at startup) — DREK reads `GOOGLE_APPLICATION_CREDENTIALS`,
+   `NEUROCORE_URL`, `NEUROCORE_TOKEN`, `LLM_PROVIDER`, `POLLING_INTERVAL_MS`,
+   `LLM_TIMEOUT_MS`, etc. from there.
+3. NSSM wraps `dist/index.js` as a Windows service. See `scripts/nssm-setup.ps1`
+   in the repo — same pattern Neurocore and PI use. Co-located on Rick's
+   Windows host so all inter-service calls are localhost. (We do NOT use pm2:
+   PI hit ghost-process and port-lock issues with pm2 on Windows; NSSM is the
+   native solution.)
+4. nginx is not required for v1 — DREK is single-user, accessed at
+   `http://localhost:3003`. Add nginx only if external access is needed later.
 
-### pm2 Ecosystem Config
+### NSSM Service Definition
 
-```javascript
-// ecosystem.config.js
-module.exports = {
-  apps: [{
-    name: 'drek',
-    script: 'dist/index.js',
-    env: {
-      NODE_ENV: 'production',
-      PORT: '3003',
-      LLM_PROVIDER: 'claude',
-      NEUROCORE_URL: 'http://localhost:3001',
-      NEUROCORE_TOKEN: '...',
-      GOOGLE_APPLICATION_CREDENTIALS: '/path/to/drek-prod-sa.json',
-      POLLING_INTERVAL_MS: '1800000',
-      LLM_TIMEOUT_MS: '120000',
-    }
-  }]
-};
-```
+The PowerShell installer (`scripts/nssm-setup.ps1`) creates a `DREK` Windows
+service that runs `node dist/index.js` from the repo root, with stdout/stderr
+captured to `logs/service.log` and `logs/error.log`, 10 MB log rotation, and
+auto-restart on crash. Re-run as Administrator after each `npm run build`.
 
 ### Rollout Strategy
 
@@ -507,7 +500,7 @@ Single deploy. No canary, no feature flags, no staged rollout. This is a greenfi
 
 ### Rollback
 
-- `pm2 stop drek` → service offline, no user impact (internal tool).
+- `nssm stop DREK` (PowerShell, Administrator) → service offline, no user impact (internal tool).
 - `git revert` + redeploy for code issues.
 - Firestore data is append-only (plans are never auto-deleted) — bad data can be manually cleaned.
 
@@ -529,8 +522,8 @@ Single deploy. No canary, no feature flags, no staged rollout. This is a greenfi
 
 | Milestone | Description | Deliverable | Dependencies | Effort |
 |-----------|-------------|-------------|-------------|--------|
-| M0 | Project scaffold | TypeScript project, Hono server, Firestore connection, pm2 config, health check endpoint, pino logging | Firebase project created | ~2 hours |
-| M1 | LLM provider abstraction | `LLMProvider` interface, `ClaudeCLIProvider`, `CodexCLIProvider`, env-based selection, error handling, timeout | Claude CLI + Codex CLI installed on VPS | ~2 hours |
+| M0 | Project scaffold | TypeScript project, Hono server, Firestore connection, NSSM install script (`scripts/nssm-setup.ps1`), health check endpoint, pino logging | Firebase project created | ~2 hours |
+| M1 | LLM provider abstraction | `LLMProvider` interface, `ClaudeCLIProvider`, `CodexCLIProvider`, env-based selection, error handling, timeout | Claude CLI + Codex CLI installed on Rick's Windows host | ~2 hours |
 | M2 | Neurocore client | HTTP client with auth, all 5 call types (3 existing endpoints + 2 Gap 5 endpoints), graceful degradation, retry logic | Neurocore Gap 1 + Gap 5 shipped | ~3 hours |
 | M3 | Data model + CRUD | Firestore collections (plans, scenes, available_listings, config), Zod schemas, create/read/update operations | M0 | ~3 hours |
 | M4 | Planning engine — requirement detection | Call 1 (requirement detection), LLM prompt + output parsing, plan status transition to `requirements_reviewed` | M1, M3 | ~3 hours |
@@ -568,7 +561,7 @@ Single deploy. No canary, no feature flags, no staged rollout. This is a greenfi
 ```
 drek/
 ├── src/
-│   ├── index.ts                    # Hono server, pm2 entry point, polling init
+│   ├── index.ts                    # Hono server entry, polling init
 │   ├── routes/
 │   │   ├── dashboard.ts            # GET / — plan list
 │   │   ├── plan.ts                 # GET/POST /plans/:id — detail + actions
@@ -617,7 +610,8 @@ drek/
 ├── static/
 │   ├── htmx.min.js                 # Vendored HTMX 2.x
 │   └── style.css                   # Minimal utilitarian styles
-├── ecosystem.config.js             # pm2 config
+├── scripts/
+│   └── nssm-setup.ps1              # Windows service installer (run as Admin)
 ├── tsconfig.json
 ├── package.json
 └── vitest.config.ts

@@ -50,6 +50,17 @@ const envSchema = z.object({
   // Wall-clock cap on a single Neurocore HTTP call. Single retry on top, so
   // worst-case wait is ~2× this + 2s backoff.
   NEUROCORE_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  // --- Model catalog (M1.5) -------------------------------------------------
+  // Optional. If unset, the model-refresh cron skips that provider with a
+  // logged warning — the catalog endpoint still returns whatever was last
+  // cached, so DREK keeps working with the env-pinned CLAUDE_MODEL/CODEX_MODEL.
+  ANTHROPIC_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+
+  // How often the cron checks for new models. Default 24h; lower it if you
+  // want faster pickup, raise it to spare the upstream rate limit.
+  MODEL_REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
 });
 
 export type Env = z.infer<typeof envSchema>;

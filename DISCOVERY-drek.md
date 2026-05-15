@@ -3,7 +3,7 @@
 **Date:** 2026-05-14 (revised)
 **Participants:** Rick (product owner), Lisa (discovery lead), Tony Stark (engineering), Light (PM), Misa (content strategy)
 **Status:** Draft — revised
-**Confidence:** High on scope and architecture. Tech stack pending one decision (UI interactivity level).
+**Confidence:** High. All critical sections settled. Tech stack locked.
 
 ---
 
@@ -96,13 +96,13 @@ None identified. No existing tool combines project portfolio knowledge with AI-p
 - **Technology preferences or constraints:**
   - Language: TypeScript 5.x
   - Runtime: Node.js 20.x LTS
-  - Framework: **Pending decision** (see OQ-3)
+  - Framework: Hono 4.x
   - Database: Firestore (own Firebase project, separate from Neurocore — following the app-isolation pattern)
   - LLM: Provider abstraction — `ClaudeCLIProvider` + `CodexCLIProvider`, selected via config flag
   - Deployment: pm2 + nginx on Rick's VPS, co-located with Neurocore and PI
   - Build tool: Claude Code (not Barker)
 
-- **Evidence quality:** Settled (except framework — pending)
+- **Evidence quality:** Settled
 
 ### Tech Stack Options
 
@@ -130,7 +130,8 @@ Rick asked for options rather than defaulting to Neurocore's stack. Three option
   - **YouTube mode** — primary audience: potential clients wanting AI systems built, 8-15 minute target, business-outcomes-first framing, storytelling structure (problem → cost/pain → solution → result), Rick's personality and spoken voice carry the delivery. Secondary audience (practitioners) naturally served by technical credibility.
 - **Full script writing** — DREK generates complete spoken-word scripts per scene in Rick's voice, not just outlines or bullet points. Scripts include spoken transitions, emphasis cues, and pacing notes.
 - **Scene card generation** — structured shot-by-shot plan with description, framing notes (e.g., "medium shot, screenshare, terminal visible"), and complete script per scene
-- **User constraints** — Rick provides per-plan constraints (headless only, screenshare only, specific project focus, time limit, audience override, etc.)
+- **Target runtime input** — first-class field on every plan. Rick specifies exact target runtime per video (not just mode defaults). DREK calibrates scene count and script density accordingly.
+- **User constraints** — Rick provides per-plan constraints (headless only, screenshare only, specific project focus, audience override, etc.)
 - **Exportable shoot instructions** — document output that Rick references while recording on Loom
 - **Scene cards UI** — web interface for reviewing, reordering, and editing scene cards and scripts
 - **Manual topic input** — for YouTube videos not triggered by job listings
@@ -187,7 +188,7 @@ Rick asked for options rather than defaulting to Neurocore's stack. Three option
 |---|----------|-------|-----------|--------|
 | OQ-1 | Optimal YouTube video length for Rick's audience | Rick | Post-launch audience data | Resolved — Default 8-15 minutes per Misa's recommendation; adjustable per plan. Rick refines after publishing first videos. |
 | OQ-2 | Will DREK ever generate editing instructions (cuts, transitions, B-roll callouts)? | Rick | Post-v1 usage patterns | Resolved — Explicitly out of scope for v1. Deferred to v2+. |
-| OQ-3 | How interactive is the scene card UI? (determines framework choice) | Rick | — | **Open** — Drag-to-reorder + inline edit + visual timeline = Next.js. Forms + lists + read-only cards = Hono. This is the last blocking question before tech stack is locked. |
+| OQ-3 | How interactive is the scene card UI? (determines framework choice) | Rick | — | Resolved — Light assessed that interactive richness has low ROI for DREK (3-5 cover letter scenes, 8-12 YouTube scenes; move-up/down + inline textarea covers all needs). Hono 4.x selected. Rick asked for this assessment and did not override. |
 | OQ-4 | Spoken-voice profile source material approach | Rick | — | **Open** — Option A: Rick provides spoken transcript samples (higher fidelity). Option B: Derive from written voice profile (lower effort). See Neurocore Gap 4. |
 
 ---
@@ -201,7 +202,7 @@ Rick asked for options rather than defaulting to Neurocore's stack. Three option
 | D-3: PI→Neurocore→DREK signal routing (hub-and-spoke) | PI already signals Neurocore via its signals route. DREK subscribes to Neurocore signals rather than coupling directly to PI. Neurocore is the hub; PI and DREK are spokes. | Tony (proposed), team consensus | 2026-05-14 |
 | D-4: Text-only scene planning for v1, architecture accommodates future image gen | Rick: "for now I only need text descriptions" but "in the near future, I might add other types of videos... those future videos may require image generation. At the very least storyboards for the planning phase." v1 is text-only; schema includes nullable storyboard fields. | Rick | 2026-05-14 |
 | D-5: Single user (Rick only) | Internal tool for Rick's personal video production workflow. No multi-user requirements. | Rick | 2026-05-14 |
-| D-6: Framework — pending | Rick pushed back on auto-selecting Hono: "not necessarily. We can use the same stack or not. This depends entirely on whether the tech is the best for our use case." Three options presented (Hono, FastAPI, Next.js). Blocked on OQ-3 (UI interactivity level). | Rick (requested options) | 2026-05-14 |
+| D-6: Framework — Hono 4.x | Rick requested options. Three presented (Hono, FastAPI, Next.js). Light assessed DREK's scene card volume and interaction patterns don't justify Next.js complexity. Hono + HTMX covers all realistic interactions. FastAPI only wins if local image gen becomes v1 scope (it's not). Rick asked for this assessment and did not override. | Light (assessed), Rick (accepted) | 2026-05-14 |
 | D-7: pm2 + nginx on Rick's VPS | Same deployment target as Neurocore and PI. Co-location enables localhost API calls with zero latency, no TLS overhead on internal calls. | Tony (confirmed) | 2026-05-14 |
 | D-8: Build via Claude Code, not Barker | Consistent with Rick's build approach across all current projects. Iterative file modification expected. | Rick | 2026-05-14 |
 | D-9: Neurocore gap work completes before DREK build | Five Neurocore-side changes required. ~1 day total. All changes are Neurocore work, not DREK work. Detailed in separate gap spec. | Tony (proposed), Rick (confirmed cron lives in Neurocore) | 2026-05-14 |
@@ -215,15 +216,16 @@ Rick asked for options rather than defaulting to Neurocore's stack. Three option
 | D-17: No brand assets or design system | Internal tool. Functional/utilitarian UI. No logo, brand colors, or custom typography. System fonts. | Lisa (default) | 2026-05-14 |
 | D-18: Full script writing in scope | Rick: "I actually want Drek to handle script writing." DREK generates complete spoken-word scripts per scene, not just outlines or planning notes. | Rick | 2026-05-14 |
 | D-19: YouTube audience = potential clients, not practitioners | Rick: "I want to target potential clients, people who actually want the ai systems/automations that I will showcase." Practitioners are secondary. DREK defaults to client-buyer perspective unless overridden. | Rick | 2026-05-14 |
-| D-20: Polling for v1, webhook for v2 (PI signal consumption) | v1: DREK polls Neurocore's pending-video endpoint on a cron. v2: Neurocore pushes to DREK webhook. Polling is simpler, and same-VPS latency is negligible. | Tony (proposed) | 2026-05-14 |
+| D-20: Polling for v1, webhook for v2 (PI signal consumption) | v1: DREK polls Neurocore's pending-video endpoint on a cron. v2: Neurocore pushes to DREK webhook. Polling is simpler, and same-VPS latency is negligible. Cover letter batch workflow confirms polling fits Rick's usage pattern. | Tony (proposed), Rick (confirmed batch pattern) | 2026-05-14 |
+| D-21: Target runtime is a first-class input field | Rick specifies exact target runtime per video, not just mode defaults (2min/8-15min). DREK calibrates scene count and script density to fit. | Rick | 2026-05-14 |
 
 ---
 
 ## 9. Recommendation
 
 - **Proceed to specs?** Yes, with one caveat.
-- **Blocking caveat:** OQ-3 (scene card UI interactivity) must be answered before the tech spec can be written. This determines the framework choice, which affects the entire build plan.
+- **No blocking caveats.** All open questions resolved. Neurocore gap work (D-9) can start immediately.
 - **Non-blocking caveat:** OQ-4 (spoken-voice source material) doesn't block the DREK spec — it blocks Neurocore Gap 4 implementation.
 - **Neurocore gap work:** Detailed in a separate document (`GAP-SPEC-drek-prerequisites.md` in the Neurocore repo). Five gaps, ~1 day total. Can proceed in parallel with DREK spec writing.
 - **Suggested spec focus:** Heavy on **Tech Spec** (Neurocore integration contract, two-mode planning engine, script generation pipeline, LLM provider abstraction, scene card data model) and **PRD** (feature-level detail for scene card UX, script editing workflow, planning workflow, constraint input). UI Design is lightweight — functional dashboard, no brand work. No Copy stage needed (internal tool). No Barker plan (Claude Code build).
-- **Suggested timeline:** Neurocore gaps (~1 day, can start immediately). DREK spec writing (1-2 days, can parallel with gap work after OQ-3 is answered). DREK build (1-2 weeks via Claude Code after spec + gaps complete).
+- **Suggested timeline:** Neurocore gaps (~1 day, can start immediately). DREK spec writing (1-2 days, can parallel with gap work). DREK build (1-2 weeks via Claude Code after spec + gaps complete).

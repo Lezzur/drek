@@ -5,6 +5,7 @@ import { logger } from './logger.js';
 import { getDb } from './db/firestore.js';
 import { startScheduler } from './lib/scheduler.js';
 import { refreshModelCatalog } from './models/catalog.js';
+import { makePollingJob } from './polling/service.js';
 
 const env = getEnv();
 const app = createApp();
@@ -35,15 +36,16 @@ serve(
         logger.warn({ err: (err as Error).message }, 'firestore init failed; running without it');
       }
 
-      // Schedulers: model-catalog refresh runs every MODEL_REFRESH_INTERVAL_HOURS.
-      // We don't fire on boot — first run happens N hours after start. Once
-      // M9 lands the polling cron will register alongside this one.
+      // Schedulers: model-catalog refresh + listing-poll. Both interval-based.
+      // The poll job reads its enabled flag from Firestore (config/polling)
+      // so Rick can toggle without redeploy.
       startScheduler([
         {
           name: 'model-catalog-refresh',
           intervalMs: env.MODEL_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000,
           run: async () => { await refreshModelCatalog(); },
         },
+        makePollingJob(),
       ]);
 
       // One-shot startup refresh ~30s after boot so the catalog populates on

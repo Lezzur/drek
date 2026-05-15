@@ -61,6 +61,11 @@ const envSchema = z.object({
   // How often the cron checks for new models. Default 24h; lower it if you
   // want faster pickup, raise it to spare the upstream rate limit.
   MODEL_REFRESH_INTERVAL_HOURS: z.coerce.number().int().positive().default(24),
+
+  // --- Listing polling (M9) -------------------------------------------------
+  // How often DREK asks Neurocore for new PI listings. Default 30 minutes
+  // matches PRD §4.1. Manual "Check now" from the dashboard bypasses this.
+  POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
 });
 
 export type Env = z.infer<typeof envSchema>;

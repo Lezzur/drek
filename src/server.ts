@@ -8,6 +8,7 @@ import plan from './routes/plan.js';
 import scenes from './routes/scenes.js';
 import newPlan from './routes/new-plan.js';
 import exportRoutes from './routes/export.js';
+import listings from './routes/listings.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -44,6 +45,7 @@ export function createApp(): Hono {
   // and /plans/:id/export both win against /plans/:id wildcard.
   app.route('/', exportRoutes);
   app.route('/', plan);
+  app.route('/', listings);
   app.route('/', dashboard);
 
   return app;

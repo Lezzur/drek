@@ -4,6 +4,8 @@ import { logger } from './logger.js';
 import health from './routes/health.js';
 import models from './routes/models.js';
 import dashboard from './routes/dashboard.js';
+import plan from './routes/plan.js';
+import scenes from './routes/scenes.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -31,6 +33,10 @@ export function createApp(): Hono {
 
   app.route('/', health);
   app.route('/', models);
+  // Scene partials must be mounted BEFORE the plan page so the more-specific
+  // `/plans/:id/scenes/...` routes win the match against `/plans/:id`.
+  app.route('/', scenes);
+  app.route('/', plan);
   app.route('/', dashboard);
 
   return app;

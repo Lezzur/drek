@@ -2,7 +2,7 @@ import type { FC } from 'hono/jsx';
 import { Layout } from './layout.js';
 
 interface PrefilledListing {
-  id: string;
+  id?: string;
   title: string;
   rawText: string | null;
 }
@@ -39,7 +39,7 @@ export const NewCoverLetterPlanPage: FC<NewCoverLetterFormProps> = ({
       </p>
       {prefilled ? (
         <div class="flash ok">
-          Pre-filled from available listing <strong>{prefilled.id}</strong>.
+          Pre-filled from {prefilled.id ? <>listing <strong>{prefilled.id}</strong></> : 'Prospect Intelligence'}.
         </div>
       ) : null}
       <form method="post" action="/plans/new/cover-letter" class="card">

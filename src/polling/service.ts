@@ -200,6 +200,8 @@ async function processListing(
   }
 
   const title = buildPlanTitle(listing);
+  const listingText = listing.listingText ?? listing.videoRequirements;
+
   await createPlan(
     {
       type: 'cover_letter',
@@ -208,7 +210,7 @@ async function processListing(
       // Rick adjusts per-plan via the M8 runtime input.
       targetRuntimeSeconds: 120,
       sourceListingId: listing.listingId,
-      sourceListingText: listing.videoRequirements,
+      sourceListingText: listingText,
       status: 'awaiting_review',
     },
     db,
@@ -222,7 +224,7 @@ async function processListing(
       title,
       company: listing.company,
       summary: listing.videoRequirements,
-      rawText: listing.videoRequirements,
+      rawText: listingText,
     },
     db,
   );

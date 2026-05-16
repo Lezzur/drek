@@ -128,7 +128,7 @@ export const DashboardPage: FC<DashboardProps> = ({
         <h1 style="margin:0;">Video plans</h1>
         <span class="spacer" />
         <button
-          class="btn"
+          class="btn accent"
           type="button"
           hx-post="/poll"
           hx-target="#poll-result"

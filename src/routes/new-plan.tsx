@@ -39,6 +39,14 @@ app.get('/plans/new/cover-letter', async (c) => {
       prefilled = { id: l.id, title: l.title, rawText: l.rawText };
     }
   }
+  // Fallback: accept title/text as query params (for PI listings not in DREK's DB)
+  if (!prefilled) {
+    const title = url.searchParams.get('title');
+    const text = url.searchParams.get('text');
+    if (title || text) {
+      prefilled = { id: listingId ?? undefined, title: title ?? '', rawText: text ?? '' };
+    }
+  }
   return c.html(<NewCoverLetterPlanPage prefilled={prefilled} />);
 });
 

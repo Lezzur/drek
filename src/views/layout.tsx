@@ -133,6 +133,8 @@ h3.section-label {
 .btn:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); text-decoration: none; color: var(--bg); }
 .btn.secondary { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
 .btn.secondary:hover { background: var(--btn-secondary-hover); text-decoration: none; color: var(--ink); }
+.btn.accent { background: #4a7fc1; border-color: #4a7fc1; color: #fff; }
+.btn.accent:hover { background: #3868a8; border-color: #3868a8; color: #fff; }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger:hover { background: #a00000; }
 .btn.small { padding: 6px 10px; font-size: 13px; border-radius: 5px; }
@@ -336,6 +338,29 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
 .htmx-indicator { display: none; }
 .htmx-request.htmx-indicator { display: inline; }
 button.btn.htmx-request { opacity: 0.55; cursor: wait; pointer-events: none; }
+@keyframes drek-spin { to { transform: rotate(360deg); } }
+.pipeline-indicator {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 11px 14px;
+  background: var(--amber-bg);
+  border: 1px solid rgba(200,144,64,0.35);
+  border-radius: 7px;
+  color: var(--amber-fg);
+  font-size: 13px;
+}
+.pipeline-indicator.htmx-request { display: flex; }
+.pipeline-indicator::before {
+  content: '';
+  flex-shrink: 0;
+  width: 14px; height: 14px;
+  border: 2px solid rgba(200,144,64,0.25);
+  border-top-color: var(--amber-fg);
+  border-radius: 50%;
+  animation: drek-spin 0.75s linear infinite;
+}
 .runtime-bar-wrap {
   margin: 6px 0 12px;
 }
@@ -373,6 +398,32 @@ button.btn.htmx-request { opacity: 0.55; cursor: wait; pointer-events: none; }
   font-size: 12px;
   color: var(--ink-2);
 }
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 28px 24px 20px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.modal-msg {
+  font-size: 15px;
+  color: var(--ink);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 .tag {
   display: inline-block;
   padding: 2px 7px;
@@ -387,6 +438,26 @@ button.btn.htmx-request { opacity: 0.55; cursor: wait; pointer-events: none; }
 `;
 
 const HTMX_CDN = 'https://unpkg.com/htmx.org@2.0.4';
+
+const CONFIRM_SCRIPT = `
+(function () {
+  var modal, okBtn, cancelBtn;
+  function close() { modal.classList.remove('open'); }
+  document.addEventListener('DOMContentLoaded', function () {
+    modal = document.getElementById('confirm-modal');
+    okBtn = document.getElementById('confirm-ok');
+    cancelBtn = document.getElementById('confirm-cancel');
+    cancelBtn.addEventListener('click', close);
+    modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+  });
+  document.body.addEventListener('htmx:confirm', function (evt) {
+    evt.preventDefault();
+    document.getElementById('confirm-modal-msg').textContent = evt.detail.question;
+    modal.classList.add('open');
+    okBtn.onclick = function () { close(); evt.detail.issueRequest(); };
+  });
+})();
+`;
 
 export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
   return (
@@ -414,6 +485,16 @@ export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
           ) : null}
           {children}
         </main>
+        <div id="confirm-modal" class="modal-overlay" role="dialog" aria-modal="true">
+          <div class="modal-card">
+            <p id="confirm-modal-msg" class="modal-msg"></p>
+            <div class="modal-actions">
+              <button id="confirm-cancel" class="btn secondary">Cancel</button>
+              <button id="confirm-ok" class="btn">Confirm</button>
+            </div>
+          </div>
+        </div>
+        <script dangerouslySetInnerHTML={{ __html: CONFIRM_SCRIPT }} />
       </body>
     </html>
   );

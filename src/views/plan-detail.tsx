@@ -91,8 +91,8 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
           Export shoot instructions
         </a>
       </div>
-      <div class="muted" style="font-size:13px; margin-top:10px;">
-        <span id="run-indicator" class="htmx-indicator">Running pipeline (this can take a couple of minutes)…</span>
+      <div id="run-indicator" class="pipeline-indicator">
+        Running pipeline — this usually takes a minute or two…
       </div>
     </div>
   );
@@ -210,7 +210,7 @@ export const PlanDetailPage: FC<PlanDetailProps> = ({ plan, scenes, flash }) => 
       <RuntimeBar targetSeconds={plan.targetRuntimeSeconds} estimatedSeconds={plan.estimatedRuntimeSeconds} />
       {plan.userConstraints ? (
         <div class="card">
-          <h3 class="section-label">Your constraints</h3>
+          <h3 class="section-label">Instructions</h3>
           <div style="font-size:14.5px;color:var(--ink-2);white-space:pre-wrap;">{plan.userConstraints}</div>
         </div>
       ) : null}

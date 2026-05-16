@@ -109,7 +109,7 @@ export async function matchProjects(
   opts: MatchProjectsOptions = {},
 ): Promise<MatchProjectsResult> {
   const t0 = Date.now();
-  const provider = opts.provider ?? getLLMProvider();
+  const provider = opts.provider ?? await getLLMProvider();
   const client = opts.client ?? getNeurocoreClient();
 
   // ---- Load + validate plan ------------------------------------------

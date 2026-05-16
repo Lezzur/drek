@@ -1,28 +1,27 @@
 import { getEnv } from '../env.js';
+import { getLLMSettings } from '../db/llm-settings.js';
 import { runCli } from './cli-runner.js';
 import type { LLMProvider } from './types.js';
 
 /**
- * Routes prompts through the local OpenAI `codex` CLI in non-interactive mode:
- *   <CODEX_BIN> exec --model <CODEX_MODEL> < prompt-on-stdin
+ * Routes prompts through the local OpenAI `codex` CLI in non-interactive mode.
  *
- * The `exec` subcommand is Codex's non-interactive prompt runner. If your
- * installed Codex CLI version exposes a different subcommand or flag name,
- * override `CODEX_BIN`/`CODEX_MODEL` in `.env` and (if needed) extend this
- * file to take args from env too. Default model is a placeholder — set
- * CODEX_MODEL to whatever your install accepts.
+ * Default invocation: codex --model <model> -q < prompt-on-stdin
+ * The -q (quiet/non-interactive) flag and model come from LLM settings.
+ * Override CODEX_BIN in .env if your codex binary is not on PATH.
  */
 export class CodexCLIProvider implements LLMProvider {
   readonly name = 'codex' as const;
 
   async generate(prompt: string, opts?: { timeoutMs?: number }): Promise<string> {
     const env = getEnv();
+    const { codexModel } = await getLLMSettings();
     return runCli(
       {
         providerName: 'codex',
         bin: env.CODEX_BIN,
-        args: ['exec', '--model', env.CODEX_MODEL],
-        logMeta: { model: env.CODEX_MODEL },
+        args: ['--model', codexModel, '-q'],
+        logMeta: { model: codexModel },
       },
       prompt,
       opts?.timeoutMs ?? env.LLM_TIMEOUT_MS,

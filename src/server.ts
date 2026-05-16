@@ -9,6 +9,7 @@ import scenes from './routes/scenes.js';
 import newPlan from './routes/new-plan.js';
 import exportRoutes from './routes/export.js';
 import listings from './routes/listings.js';
+import settings from './routes/settings.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -46,6 +47,7 @@ export function createApp(): Hono {
   app.route('/', exportRoutes);
   app.route('/', plan);
   app.route('/', listings);
+  app.route('/', settings);
   app.route('/', dashboard);
 
   return app;

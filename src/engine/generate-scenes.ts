@@ -70,7 +70,7 @@ export async function generateScenes(
   opts: GenerateScenesOptions = {},
 ): Promise<GenerateScenesResult> {
   const t0 = Date.now();
-  const provider = opts.provider ?? getLLMProvider();
+  const provider = opts.provider ?? await getLLMProvider();
 
   // ---- Load + validate plan ------------------------------------------
   const plan = await getPlan(planId, opts.db);

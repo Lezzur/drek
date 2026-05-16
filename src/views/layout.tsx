@@ -476,6 +476,7 @@ export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
             <nav>
               <a href="/">Dashboard</a>
               <a href="/listings">Available listings</a>
+              <a href="/settings">Settings</a>
             </nav>
           </div>
         </header>

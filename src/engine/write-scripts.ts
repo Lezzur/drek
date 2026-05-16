@@ -77,7 +77,7 @@ export async function writeScripts(
   opts: WriteScriptsOptions = {},
 ): Promise<WriteScriptsResult> {
   const t0 = Date.now();
-  const provider = opts.provider ?? getLLMProvider();
+  const provider = opts.provider ?? await getLLMProvider();
   const client = opts.client ?? getNeurocoreClient();
 
   // ---- Load + validate plan ------------------------------------------

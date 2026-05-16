@@ -84,7 +84,7 @@ export async function detectRequirements(
   opts: DetectRequirementsOptions = {},
 ): Promise<DetectRequirementsResult> {
   const t0 = Date.now();
-  const provider = opts.provider ?? getLLMProvider();
+  const provider = opts.provider ?? await getLLMProvider();
 
   // ---- Load + validate plan ------------------------------------------
   const plan = await getPlan(planId, opts.db);

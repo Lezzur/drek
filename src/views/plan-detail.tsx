@@ -61,6 +61,17 @@ const RuntimeBar: FC<{ targetSeconds: number; estimatedSeconds: number }> = ({
  */
 const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
   const isCoverLetter = plan.type === 'cover_letter';
+
+  // "Initial state" = clean slate, run the full pipeline in one shot.
+  // Cover letter plans start at awaiting_review; YouTube plans start at
+  // requirements_reviewed with no matches yet (no detect step for them).
+  const isInitialState =
+    (isCoverLetter && plan.status === 'awaiting_review') ||
+    (!isCoverLetter &&
+      plan.status === 'requirements_reviewed' &&
+      plan.matchedProjects.length === 0);
+
+  // Recovery / re-run buttons — shown once the plan is mid-pipeline.
   const canAnalyze =
     isCoverLetter &&
     ['awaiting_review', 'requirements_reviewed', 'projects_matched'].includes(plan.status);
@@ -80,49 +91,64 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
     <div class="card" style="margin-bottom:16px;">
       <h3 class="section-label">Pipeline</h3>
       <div class="row" style="gap:12px; flex-wrap:wrap;">
-        {isCoverLetter ? (
+        {isInitialState ? (
           <button
-            class={`btn${analyzeDone ? ' secondary' : ''}`}
+            class="btn"
             type="button"
-            disabled={!canAnalyze}
-            hx-post={`/plans/${plan.id}/analyze`}
+            hx-post={`/plans/${plan.id}/run`}
             hx-target="body"
             hx-swap="outerHTML"
-            hx-indicator="#analyze-indicator"
+            hx-indicator="#run-indicator"
           >
-            <span class={`step-chip${analyzeDone ? ' done' : ''}`}>{analyzeDone ? '✓' : '1'}</span>
-            Analyze requirements
+            Run pipeline
           </button>
-        ) : null}
-        <button
-          class={`btn${matchDone ? ' secondary' : ''}`}
-          type="button"
-          disabled={!canMatch}
-          hx-post={`/plans/${plan.id}/match`}
-          hx-target="body"
-          hx-swap="outerHTML"
-          hx-indicator="#match-indicator"
-        >
-          <span class={`step-chip${matchDone ? ' done' : ''}`}>{matchDone ? '✓' : isCoverLetter ? '2' : '1'}</span>
-          Match projects
-        </button>
-        <button
-          class={`btn${generateDone ? ' secondary' : ''}`}
-          type="button"
-          disabled={!canGenerate}
-          hx-post={`/plans/${plan.id}/generate`}
-          hx-target="body"
-          hx-swap="outerHTML"
-          hx-indicator="#generate-indicator"
-          hx-confirm={
-            plan.status === 'scenes_generated'
-              ? 'Re-generate scenes? Existing scene edits will be replaced.'
-              : undefined
-          }
-        >
-          <span class={`step-chip${generateDone ? ' done' : ''}`}>{generateDone ? '✓' : isCoverLetter ? '3' : '2'}</span>
-          Generate scenes + scripts
-        </button>
+        ) : (
+          <>
+            {isCoverLetter ? (
+              <button
+                class={`btn${analyzeDone ? ' secondary' : ''}`}
+                type="button"
+                disabled={!canAnalyze}
+                hx-post={`/plans/${plan.id}/analyze`}
+                hx-target="body"
+                hx-swap="outerHTML"
+                hx-indicator="#analyze-indicator"
+              >
+                <span class={`step-chip${analyzeDone ? ' done' : ''}`}>{analyzeDone ? '✓' : '1'}</span>
+                Analyze requirements
+              </button>
+            ) : null}
+            <button
+              class={`btn${matchDone ? ' secondary' : ''}`}
+              type="button"
+              disabled={!canMatch}
+              hx-post={`/plans/${plan.id}/match`}
+              hx-target="body"
+              hx-swap="outerHTML"
+              hx-indicator="#match-indicator"
+            >
+              <span class={`step-chip${matchDone ? ' done' : ''}`}>{matchDone ? '✓' : isCoverLetter ? '2' : '1'}</span>
+              Match projects
+            </button>
+            <button
+              class={`btn${generateDone ? ' secondary' : ''}`}
+              type="button"
+              disabled={!canGenerate}
+              hx-post={`/plans/${plan.id}/generate`}
+              hx-target="body"
+              hx-swap="outerHTML"
+              hx-indicator="#generate-indicator"
+              hx-confirm={
+                plan.status === 'scenes_generated'
+                  ? 'Re-generate scenes? Existing scene edits will be replaced.'
+                  : undefined
+              }
+            >
+              <span class={`step-chip${generateDone ? ' done' : ''}`}>{generateDone ? '✓' : isCoverLetter ? '3' : '2'}</span>
+              Generate scenes + scripts
+            </button>
+          </>
+        )}
         <span class="spacer" />
         <button
           class="btn"
@@ -143,6 +169,7 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
         </a>
       </div>
       <div class="muted" style="font-size:13px; margin-top:10px;">
+        <span id="run-indicator" class="htmx-indicator">Running pipeline (this can take a couple of minutes)…</span>
         <span id="analyze-indicator" class="htmx-indicator">Analyzing…</span>
         <span id="match-indicator" class="htmx-indicator">Matching projects…</span>
         <span id="generate-indicator" class="htmx-indicator">Generating scenes + scripts (this can take a minute)…</span>

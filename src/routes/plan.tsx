@@ -6,6 +6,7 @@ import { PlanDetailPage } from '../views/plan-detail.js';
 import { detectRequirements } from '../engine/detect-requirements.js';
 import { matchProjects } from '../engine/match-projects.js';
 import { generatePlanContent } from '../engine/write-scripts.js';
+import { runPipeline } from '../engine/pipeline.js';
 import { PlanningEngineError } from '../engine/errors.js';
 import { getNeurocoreClient } from '../neurocore/index.js';
 
@@ -44,6 +45,31 @@ app.get('/plans/:id', async (c) => {
  * We use POST + hx-swap=outerHTML on body so the entire page refresh is
  * one round-trip — no partial state synchronization needed in client.
  */
+
+app.post('/plans/:id/run', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const result = await runPipeline(id, { client: getNeurocoreClient() });
+    const parts: string[] = [];
+    if (result.requirementsResult) {
+      const n = result.requirementsResult.requirements.length;
+      parts.push(`${n} requirement${n === 1 ? '' : 's'} extracted`);
+    }
+    const pm = result.matchResult.matchedProjects.length;
+    parts.push(`${pm} project${pm === 1 ? '' : 's'} matched`);
+    const sc = result.scriptsResult.scenes.length;
+    parts.push(`${sc} scene${sc === 1 ? '' : 's'} with scripts`);
+    const degraded = result.matchResult.degraded || result.scriptsResult.degraded;
+    return renderPlanPage(c, id, {
+      type: degraded ? 'warn' : 'ok',
+      message:
+        parts.join(' · ') +
+        (degraded ? ' — Neurocore degraded, context may be thinner' : ''),
+    });
+  } catch (err) {
+    return renderPlanPage(c, id, errorToFlash(err, 'pipeline'));
+  }
+});
 
 app.post('/plans/:id/analyze', async (c) => {
   const id = c.req.param('id');

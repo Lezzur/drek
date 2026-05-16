@@ -231,6 +231,7 @@ async function processListing(
 }
 
 function buildPlanTitle(listing: PendingListing): string {
+  if (listing.listingTitle) return listing.listingTitle;
   const role = listing.role ?? 'Role';
   const company = listing.company ?? 'Unknown company';
   return `${role} at ${company}`;

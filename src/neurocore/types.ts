@@ -29,6 +29,7 @@ export interface MemoryContextResponse {
 export interface PendingListing {
   memoryId: string;
   listingId: string | null;
+  listingTitle: string | null;
   company: string | null;
   role: string | null;
   videoRequirements: string | null;

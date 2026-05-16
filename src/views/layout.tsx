@@ -20,27 +20,37 @@ export interface LayoutProps {
 
 const STYLES = `
 :root {
-  --bg: #fafaf7;
-  --surface: #ffffff;
-  --border: #e8e6e0;
-  --border-soft: #eee9e0;
-  --border-strong: #d4d2cc;
-  --ink: #1a1a1a;
-  --ink-2: #3a3a3a;
-  --ink-3: #6b6b6b;
-  --ink-4: #9a9a9a;
-  --link: #1a5fb4;
-  --script-bg: #fbf9f3;
-  --danger: #b80000;
-  --danger-bg: #fdebeb;
-  --blue-bg: #e8f0fb;
-  --blue-fg: #1a5fb4;
-  --amber-bg: #fdf2dd;
-  --amber-fg: #7a4d00;
-  --green-bg: #e3f4ea;
-  --green-fg: #1a6b3a;
-  --grey-bg: #ececea;
-  --grey-fg: #5a5a5a;
+  --bg: #111110;
+  --surface: #1c1c1a;
+  --border: #2a2a27;
+  --border-soft: #232320;
+  --border-strong: #363632;
+  --ink: #eae8e1;
+  --ink-2: #c0beb7;
+  --ink-3: #7a7872;
+  --ink-4: #4e4c47;
+  --link: #6ba3e0;
+  --script-bg: #19180f;
+  --danger: #e06060;
+  --danger-bg: #2c1515;
+  --blue-bg: #152035;
+  --blue-fg: #6ba3e0;
+  --amber-bg: #241908;
+  --amber-fg: #c89040;
+  --green-bg: #0e1f14;
+  --green-fg: #50a870;
+  --grey-bg: #1e1e1c;
+  --grey-fg: #7a7872;
+  --header-bg: #0c0c0b;
+  --header-color: #eae8e1;
+  --surface-raised: #252522;
+  --row-hover: #222220;
+  --input-bg: #161614;
+  --btn-primary-hover: #cbc9c2;
+  --btn-secondary-hover: #252522;
+  --flash-ok-border: #1e4a2e;
+  --flash-warn-border: #4a3010;
+  --flash-err-border: #4a1515;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -54,8 +64,8 @@ body {
 a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 header.app {
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--header-bg);
+  color: var(--header-color);
   padding: 14px 32px;
   display: flex;
   align-items: center;
@@ -65,12 +75,12 @@ header.app .brand {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--bg);
+  color: var(--header-color);
   text-decoration: none;
 }
 header.app nav { display: flex; gap: 20px; margin-left: auto; }
 header.app nav a {
-  color: var(--bg);
+  color: var(--header-color);
   font-size: 14px;
   opacity: 0.7;
   text-decoration: none;
@@ -120,9 +130,9 @@ h3.section-label {
   cursor: pointer;
   text-decoration: none;
 }
-.btn:hover { background: #333; border-color: #333; text-decoration: none; color: var(--bg); }
-.btn.secondary { background: #fff; color: var(--ink); border-color: var(--border-strong); }
-.btn.secondary:hover { background: #f4f2ec; text-decoration: none; color: var(--ink); }
+.btn:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); text-decoration: none; color: var(--bg); }
+.btn.secondary { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
+.btn.secondary:hover { background: var(--btn-secondary-hover); text-decoration: none; color: var(--ink); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger:hover { background: #a00000; }
 .btn.small { padding: 6px 10px; font-size: 13px; border-radius: 5px; }
@@ -161,9 +171,9 @@ button.btn { font-family: inherit; }
   margin-bottom: 16px;
   font-size: 14px;
 }
-.flash.ok { background: var(--green-bg); border: 1px solid #c8e8d5; color: var(--green-fg); }
-.flash.warn { background: var(--amber-bg); border: 1px solid #e8d4a0; color: var(--amber-fg); }
-.flash.err { background: var(--danger-bg); border: 1px solid #f0b8b8; color: var(--danger); }
+.flash.ok { background: var(--green-bg); border: 1px solid var(--flash-ok-border); color: var(--green-fg); }
+.flash.warn { background: var(--amber-bg); border: 1px solid var(--flash-warn-border); color: var(--amber-fg); }
+.flash.err { background: var(--danger-bg); border: 1px solid var(--flash-err-border); color: var(--danger); }
 .row { display: flex; gap: 8px; align-items: center; }
 .spacer { flex: 1; }
 .muted { color: var(--ink-3); font-size: 14px; }
@@ -183,7 +193,7 @@ input[type="text"], input[type="number"], select {
   border-radius: 7px;
   font: inherit;
   font-size: 14px;
-  background: #fff;
+  background: var(--input-bg);
   color: var(--ink);
 }
 input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
@@ -199,7 +209,7 @@ textarea {
   border: 1px solid var(--border-strong);
   border-radius: 7px;
   resize: vertical;
-  background: #fff;
+  background: var(--input-bg);
   color: var(--ink);
   line-height: 1.5;
 }
@@ -223,7 +233,7 @@ table.plans td {
   font-size: 14px;
   border-top: 1px solid var(--border-soft);
 }
-table.plans tbody tr:hover td { background: #f7f5ee; }
+table.plans tbody tr:hover td { background: var(--row-hover); }
 table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums; }
 .scene-card {
   display: grid;
@@ -280,13 +290,13 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
 .scene-project-ref {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed #ece8de;
+  border-top: 1px dashed var(--border-strong);
   font-size: 12px;
   color: var(--ink-3);
 }
 .scene-project-ref code {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  background: #f4f2ec;
+  background: var(--surface-raised);
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 11px;
@@ -313,7 +323,7 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
   padding: 10px 14px;
   border: 1px dashed var(--border-strong);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink-3);
   cursor: pointer;
   font: 14px inherit;
@@ -330,7 +340,7 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
 }
 .runtime-bar-track {
   height: 8px;
-  background: #ececea;
+  background: var(--border-strong);
   border-radius: 999px;
   overflow: hidden;
   position: relative;
@@ -351,12 +361,12 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
   font-weight: 700;
   flex-shrink: 0;
 }
-.btn .step-chip { background: rgba(255,255,255,0.18); color: #fff; }
-.btn.secondary .step-chip { background: var(--ink); color: #fff; }
+.btn .step-chip { background: rgba(0,0,0,0.15); color: var(--bg); }
+.btn.secondary .step-chip { background: var(--border-strong); color: var(--ink); }
 .btn.secondary .step-chip.done { background: var(--green-fg); color: #fff; }
 .feature-chip {
   display: inline-block;
-  background: #f4f2ec;
+  background: var(--surface-raised);
   padding: 3px 8px;
   border-radius: 5px;
   font-size: 12px;

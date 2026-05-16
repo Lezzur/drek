@@ -19,10 +19,6 @@ const STATUS_LABELS: Record<PlanStatus, string> = {
   exported: 'Exported',
 };
 
-const DONE_STATUSES: PlanStatus[] = ['requirements_reviewed', 'projects_matched', 'scenes_generated', 'finalized', 'exported'];
-const MATCH_DONE_STATUSES: PlanStatus[] = ['scenes_generated', 'finalized', 'exported'];
-const GENERATE_DONE_STATUSES: PlanStatus[] = ['finalized', 'exported'];
-
 /**
  * Runtime bar — visualizes estimated vs target runtime. Green when within
  * 15% of target, yellow if 15-30% off, red beyond 30%. Per PRD §4.9.
@@ -54,101 +50,28 @@ const RuntimeBar: FC<{ targetSeconds: number; estimatedSeconds: number }> = ({
   );
 };
 
-/**
- * Step status block — shows the engine pipeline state (M4 → M5 → M6) and
- * surfaces the "next action" button corresponding to the current plan.status.
- * Disabled / advisory buttons render as muted text.
- */
 const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
-  const isCoverLetter = plan.type === 'cover_letter';
-
-  // "Initial state" = clean slate, run the full pipeline in one shot.
-  // Cover letter plans start at awaiting_review; YouTube plans start at
-  // requirements_reviewed with no matches yet (no detect step for them).
-  const isInitialState =
-    (isCoverLetter && plan.status === 'awaiting_review') ||
-    (!isCoverLetter &&
-      plan.status === 'requirements_reviewed' &&
-      plan.matchedProjects.length === 0);
-
-  // Recovery / re-run buttons — shown once the plan is mid-pipeline.
-  const canAnalyze =
-    isCoverLetter &&
-    ['awaiting_review', 'requirements_reviewed', 'projects_matched'].includes(plan.status);
-  const canMatch =
-    (plan.requirements.length > 0 || !isCoverLetter) &&
-    ['requirements_reviewed', 'projects_matched'].includes(plan.status);
-  const canGenerate =
-    plan.matchedProjects.length > 0 &&
-    ['projects_matched', 'scenes_generated'].includes(plan.status);
+  const canRunPipeline = plan.status !== 'dismissed';
   const canFinalize = plan.status === 'scenes_generated';
-
-  const analyzeDone = DONE_STATUSES.includes(plan.status);
-  const matchDone = MATCH_DONE_STATUSES.includes(plan.status);
-  const generateDone = GENERATE_DONE_STATUSES.includes(plan.status);
+  const rerun = ['requirements_reviewed', 'projects_matched', 'scenes_generated', 'finalized', 'exported'].includes(plan.status);
 
   return (
     <div class="card" style="margin-bottom:16px;">
       <h3 class="section-label">Pipeline</h3>
       <div class="row" style="gap:12px; flex-wrap:wrap;">
-        {isInitialState ? (
-          <button
-            class="btn"
-            type="button"
-            hx-post={`/plans/${plan.id}/run`}
-            hx-target="body"
-            hx-swap="outerHTML"
-            hx-indicator="#run-indicator"
-          >
-            Run pipeline
-          </button>
-        ) : (
-          <>
-            {isCoverLetter ? (
-              <button
-                class={`btn${analyzeDone ? ' secondary' : ''}`}
-                type="button"
-                disabled={!canAnalyze}
-                hx-post={`/plans/${plan.id}/analyze`}
-                hx-target="body"
-                hx-swap="outerHTML"
-                hx-indicator="#analyze-indicator"
-              >
-                <span class={`step-chip${analyzeDone ? ' done' : ''}`}>{analyzeDone ? '✓' : '1'}</span>
-                Analyze requirements
-              </button>
-            ) : null}
-            <button
-              class={`btn${matchDone ? ' secondary' : ''}`}
-              type="button"
-              disabled={!canMatch}
-              hx-post={`/plans/${plan.id}/match`}
-              hx-target="body"
-              hx-swap="outerHTML"
-              hx-indicator="#match-indicator"
-            >
-              <span class={`step-chip${matchDone ? ' done' : ''}`}>{matchDone ? '✓' : isCoverLetter ? '2' : '1'}</span>
-              Match projects
-            </button>
-            <button
-              class={`btn${generateDone ? ' secondary' : ''}`}
-              type="button"
-              disabled={!canGenerate}
-              hx-post={`/plans/${plan.id}/generate`}
-              hx-target="body"
-              hx-swap="outerHTML"
-              hx-indicator="#generate-indicator"
-              hx-confirm={
-                plan.status === 'scenes_generated'
-                  ? 'Re-generate scenes? Existing scene edits will be replaced.'
-                  : undefined
-              }
-            >
-              <span class={`step-chip${generateDone ? ' done' : ''}`}>{generateDone ? '✓' : isCoverLetter ? '3' : '2'}</span>
-              Generate scenes + scripts
-            </button>
-          </>
-        )}
+        <button
+          class="btn"
+          type="button"
+          disabled={!canRunPipeline}
+          hx-post={`/plans/${plan.id}/run`}
+          hx-target="body"
+          hx-swap="outerHTML"
+          hx-indicator="#run-indicator"
+          hx-disabled-elt="this"
+          hx-confirm={rerun ? 'Re-run pipeline? Existing scenes and scripts will be replaced.' : undefined}
+        >
+          Run pipeline
+        </button>
         <span class="spacer" />
         <button
           class="btn"
@@ -170,9 +93,6 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
       </div>
       <div class="muted" style="font-size:13px; margin-top:10px;">
         <span id="run-indicator" class="htmx-indicator">Running pipeline (this can take a couple of minutes)…</span>
-        <span id="analyze-indicator" class="htmx-indicator">Analyzing…</span>
-        <span id="match-indicator" class="htmx-indicator">Matching projects…</span>
-        <span id="generate-indicator" class="htmx-indicator">Generating scenes + scripts (this can take a minute)…</span>
       </div>
     </div>
   );
@@ -185,7 +105,7 @@ const RequirementsBlock: FC<{ plan: Plan }> = ({ plan }) => {
       <div class="card">
         <h3 class="section-label">Requirements · not analyzed yet</h3>
         <div class="muted">
-          Click <strong>Analyze requirements</strong> above to extract them from the listing.
+          Click <strong>Run pipeline</strong> above to extract them from the listing.
         </div>
       </div>
     );
@@ -215,7 +135,7 @@ const MatchedProjectsBlock: FC<{ plan: Plan }> = ({ plan }) => {
       <div class="card">
         <h3 class="section-label">Matched projects · none yet</h3>
         <div class="muted">
-          Click <strong>Match projects</strong> above.
+          Click <strong>Run pipeline</strong> above.
         </div>
       </div>
     );

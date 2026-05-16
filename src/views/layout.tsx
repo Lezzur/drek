@@ -334,7 +334,8 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
 }
 .btn-add-scene:hover { background: var(--bg); color: var(--ink-2); border-color: var(--border); }
 .htmx-indicator { display: none; }
-.htmx-request .htmx-indicator { display: inline; }
+.htmx-request.htmx-indicator { display: inline; }
+button.btn.htmx-request { opacity: 0.55; cursor: wait; pointer-events: none; }
 .runtime-bar-wrap {
   margin: 6px 0 12px;
 }

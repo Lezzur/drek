@@ -200,6 +200,15 @@ export async function matchProjects(
     throw err;
   }
 
+  if (matchedProjects.length === 0) {
+    throw new PlanningEngineError(
+      STEP_NAME,
+      'NO_PROJECT_MATCHES',
+      'LLM returned no matched projects — the listing may be too niche or the portfolio has no relevant work',
+      { planId },
+    );
+  }
+
   // ---- Persist + transition ------------------------------------------
   let updated: Plan | null;
   try {

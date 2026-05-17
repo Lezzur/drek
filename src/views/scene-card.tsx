@@ -67,7 +67,7 @@ const FIELD_ROWS: Partial<Record<keyof Scene, number>> = {
   title: 1,
   framingNotes: 2,
   description: 3,
-  script: 6,
+  script: 10,
   pacingNotes: 2,
   transitionNote: 2,
 };

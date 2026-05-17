@@ -188,7 +188,7 @@ button.btn { font-family: inherit; }
   border: 1px dashed var(--border-strong);
   border-radius: 10px;
 }
-form.inline { display: inline-block; margin: 0; }
+form.inline { display: block; width: 100%; margin: 0; }
 input[type="text"], input[type="number"], select {
   padding: 9px 12px;
   border: 1px solid var(--border-strong);
@@ -207,14 +207,21 @@ textarea {
   width: 100%;
   font-family: inherit;
   font-size: 14px;
-  padding: 9px 12px;
+  padding: 10px 14px;
   border: 1px solid var(--border-strong);
   border-radius: 7px;
   resize: vertical;
   background: var(--input-bg);
   color: var(--ink);
-  line-height: 1.5;
+  line-height: 1.6;
+  min-height: 80px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
+textarea::-webkit-scrollbar { width: 5px; }
+textarea::-webkit-scrollbar-track { background: transparent; }
+textarea::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+textarea::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
 table.plans {
   width: 100%;
   border-collapse: collapse;
@@ -282,8 +289,8 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
 .field-value.title-value { font-size: 16px; font-weight: 600; color: var(--ink); }
 .field-value.script-value {
   background: var(--script-bg);
-  border-left: 3px solid var(--link);
-  padding: 10px 12px;
+  border-left: 2px solid var(--ink-4);
+  padding: 10px 14px;
   border-radius: 0 6px 6px 0;
   font-size: 14.5px;
   line-height: 1.6;
@@ -441,20 +448,30 @@ const HTMX_CDN = 'https://unpkg.com/htmx.org@2.0.4';
 
 const CONFIRM_SCRIPT = `
 (function () {
-  var modal, okBtn, cancelBtn;
-  function close() { modal.classList.remove('open'); }
+  function getModal() { return document.getElementById('confirm-modal'); }
+  function getMsgEl() { return document.getElementById('confirm-modal-msg'); }
+  function getOkBtn() { return document.getElementById('confirm-ok'); }
+  function getCancelBtn() { return document.getElementById('confirm-cancel'); }
+  function close() {
+    var m = getModal();
+    if (m) m.classList.remove('open');
+  }
   document.addEventListener('DOMContentLoaded', function () {
-    modal = document.getElementById('confirm-modal');
-    okBtn = document.getElementById('confirm-ok');
-    cancelBtn = document.getElementById('confirm-cancel');
-    cancelBtn.addEventListener('click', close);
-    modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+    var cancelBtn = getCancelBtn();
+    var modal = getModal();
+    if (cancelBtn) cancelBtn.addEventListener('click', close);
+    if (modal) modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
   });
-  document.body.addEventListener('htmx:confirm', function (evt) {
+  document.addEventListener('htmx:confirm', function (evt) {
+    if (!evt.detail.question) return;
     evt.preventDefault();
-    document.getElementById('confirm-modal-msg').textContent = evt.detail.question;
+    var msgEl = getMsgEl();
+    var modal = getModal();
+    var okBtn = getOkBtn();
+    if (!msgEl || !modal || !okBtn) return;
+    msgEl.textContent = evt.detail.question;
     modal.classList.add('open');
-    okBtn.onclick = function () { close(); evt.detail.issueRequest(); };
+    okBtn.onclick = function () { close(); evt.detail.issueRequest(true); };
   });
 })();
 `;

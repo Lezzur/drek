@@ -177,6 +177,7 @@ export async function writeScripts(
         s.sceneId,
         {
           script: s.script,
+          scriptDraft: s.script,
           emphasisCues: s.emphasisCues,
           pacingNotes: s.pacingNotes,
           transitionNote: s.transitionNote,

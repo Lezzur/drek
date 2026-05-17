@@ -50,6 +50,7 @@ export interface ApprovedScriptSignal {
   planMode: PlanMode;
   scenes: Array<{
     script: string;
+    scriptDraft: string;
     wasEdited: boolean;
   }>;
 }

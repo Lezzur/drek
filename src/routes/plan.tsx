@@ -138,9 +138,8 @@ app.post('/plans/:id/finalize', async (c) => {
         planMode: plan.type,
         scenes: scenes.map((s) => ({
           script: s.script,
-          // We don't track per-field edits yet; flag the scene as edited
-          // when its script is non-empty. M11's exportable flow can refine.
-          wasEdited: s.script.length > 0,
+          scriptDraft: s.scriptDraft,
+          wasEdited: s.script !== s.scriptDraft,
         })),
       });
     } catch (err) {

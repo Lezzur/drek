@@ -381,8 +381,8 @@ describe('NeurocoreClient — sendApprovedScript', () => {
       planId: 'plan_1',
       planMode: 'cover_letter',
       scenes: [
-        { script: 'Hi I am Rick.', wasEdited: true },
-        { script: 'Let me show you the build.', wasEdited: false },
+        { script: 'Hi I am Rick.', scriptDraft: 'Hi I am Rick.', wasEdited: true },
+        { script: 'Let me show you the build.', scriptDraft: 'Let me show you the build.', wasEdited: false },
       ],
     });
     expect(fetchCalls[0]?.url).toBe('http://localhost:3100/v1/memory/signals');

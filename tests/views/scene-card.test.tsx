@@ -11,6 +11,7 @@ function fakeScene(overrides: Partial<Scene> = {}): Scene {
     description: 'desc',
     framingNotes: 'headshot',
     script: 'Hi I am Rick.',
+    scriptDraft: 'Hi I am Rick.',
     emphasisCues: [],
     pacingNotes: 'slow',
     transitionNote: 'cut',

@@ -10,6 +10,7 @@ import newPlan from './routes/new-plan.js';
 import exportRoutes from './routes/export.js';
 import listings from './routes/listings.js';
 import settings from './routes/settings.js';
+import intake from './routes/intake.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -40,6 +41,7 @@ export function createApp(): Hono {
   // New-plan forms must be mounted BEFORE plan detail so /plans/new/... beats
   // the /plans/:id wildcard. Scene partials must come before plan detail for
   // the same reason — more-specific paths win.
+  app.route('/', intake);
   app.route('/', newPlan);
   app.route('/', scenes);
   // Export routes mounted before plan-detail so /plans/:id/export.txt

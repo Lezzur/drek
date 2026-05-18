@@ -20,6 +20,7 @@ export type PlanningEngineErrorCode =
   | 'NO_LONG_FORM_DELIVERABLE'      // youtube_advanced steps need the long_form Deliverable
   | 'CANNOT_CHANGE_AFTER_PUBLISH'   // change-format rejected: plan already exported/published
   | 'UNKNOWN_FORMAT_PROFILE'        // change-format rejected: unknown formatProfileId
+  | 'HOOK_NOT_FOUND'                // hookId doesn't exist under this plan
   // ---- LLM-level failures ---------------------------------------------
   | 'LLM_FAILED'               // underlying CLI subprocess failure (timeout, exit, etc.)
   | 'INVALID_OUTPUT'           // LLM output didn't parse / didn't match schema

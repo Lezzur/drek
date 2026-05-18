@@ -4,6 +4,7 @@ import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
 import { getPlan, patchPlan } from '../db/plans.js';
 import { listScenes, patchScene } from '../db/scenes.js';
+import { getSelectedHookDraft } from '../db/hook-drafts.js';
 import {
   isAllowedPlanTransition,
   type Plan,
@@ -106,6 +107,24 @@ export async function writeScripts(
     );
   }
 
+  // ---- youtube_advanced: require selectedHookVariantId ----------------
+  // The transition table should prevent reaching write-scripts without a
+  // hook selection on youtube_advanced plans, but enforce it defensively.
+  if (plan.type === 'youtube_advanced' && !plan.selectedHookVariantId) {
+    throw new PlanningEngineError(
+      STEP_NAME,
+      'DISALLOWED_TRANSITION',
+      'youtube_advanced plan reached write-scripts without a selected hook variant — run hook generation and selection first (plans must transition through hooks_generated → hook_selected before scenes_generated)',
+      { planId },
+    );
+  }
+
+  // ---- Fetch selected hook (youtube_advanced only) --------------------
+  let selectedHook: import('../db/schemas.js').HookDraft | null = null;
+  if (plan.type === 'youtube_advanced' && plan.selectedHookVariantId) {
+    selectedHook = await getSelectedHookDraft(planId, opts.db);
+  }
+
   // ---- Pull voice profile from Neurocore ------------------------------
   let context: MemoryContextResponse;
   try {
@@ -128,7 +147,7 @@ export async function writeScripts(
   const voiceBlock = context.systemBlock.slice(0, MAX_VOICE_CONTEXT_CHARS);
 
   // ---- Build prompt and call LLM -------------------------------------
-  const basePrompt = buildPrompt(plan, scenes, voiceBlock);
+  const basePrompt = buildPrompt(plan, scenes, voiceBlock, selectedHook);
   let retried = false;
   let scripts: ScriptForScene[];
 
@@ -163,6 +182,20 @@ export async function writeScripts(
       );
     }
     throw err;
+  }
+
+  // ---- For youtube_advanced: override scene 1 script with hook.scriptText
+  // The LLM was told not to regenerate scene 1, but we enforce it verbatim
+  // by replacing whatever the LLM emitted for scene 1.
+  if (selectedHook && scenes.length > 0) {
+    const scene1 = scenes.find((s) => s.order === 1) ?? scenes[0]!;
+    const hookScriptIdx = scripts.findIndex((s) => s.sceneId === scene1.id);
+    if (hookScriptIdx >= 0) {
+      scripts[hookScriptIdx] = {
+        ...scripts[hookScriptIdx]!,
+        script: selectedHook.scriptText,
+      };
+    }
   }
 
   // ---- Persist scripts on each scene + transition plan ----------------
@@ -270,10 +303,27 @@ export async function generatePlanContent(
 // Internals
 // ---------------------------------------------------------------------------
 
-function buildPrompt(plan: Plan, scenes: Scene[], voiceBlock: string): string {
-  const rules = getCompositionRules(plan.type);
-  const totalWords = runtimeToWordCount(plan.targetRuntimeSeconds, rules.wordsPerMinute);
+const DEFAULT_WORDS_PER_MINUTE = 150;
+
+function buildPrompt(
+  plan: Plan,
+  scenes: Scene[],
+  voiceBlock: string,
+  selectedHook?: import('../db/schemas.js').HookDraft | null,
+): string {
+  // youtube_advanced uses the format-profile registry for composition rules
+  // (not v1 CompositionRules). For the word-budget calculations we use the
+  // default wpm since the format-profile wpm lives in FormatProfile.pacingRules.
+  const isV2 = plan.type === 'youtube_advanced';
+  const wpm = isV2
+    ? DEFAULT_WORDS_PER_MINUTE
+    : getCompositionRules(plan.type).wordsPerMinute;
+  const totalWords = runtimeToWordCount(plan.targetRuntimeSeconds, wpm);
   const perScene = wordBudgetPerScene(totalWords, scenes.length);
+
+  const compositionBlock = isV2
+    ? `MODE: youtube_advanced\nWrite in Rick's spoken voice — conversational, direct, technically authoritative.`
+    : compositionRulesToPrompt(getCompositionRules(plan.type));
 
   const sceneList = scenes
     .map((s) => {
@@ -289,14 +339,18 @@ function buildPrompt(plan: Plan, scenes: Scene[], voiceBlock: string): string {
     })
     .join('\n\n');
 
+  const hookNote = selectedHook
+    ? `\nHOOK VARIANT (scene 1 is already written — Rick chose this hook):\nArchetype: ${selectedHook.archetype}\nScene 1's script has ALREADY been written (Rick chose a hook variant: '${selectedHook.archetype}'). Reference scene 1 in your transitions but DO NOT regenerate scene 1's script.\n`
+    : '';
+
   return `You are writing the full SPOKEN-WORD SCRIPTS for every scene of a video Rick is about to record. The scene cards (what to show, framing) are already locked. Your job is to write what Rick will SAY for each scene, in Rick's voice.
 
-${compositionRulesToPrompt(rules)}
+${compositionBlock}
 
 VOICE CONTEXT (from Neurocore — Rick's spoken-voice fingerprint, profile, and any listing insight):
 
 ${voiceBlock}
-
+${hookNote}
 TARGET TOTAL RUNTIME: ${plan.targetRuntimeSeconds}s  (~${totalWords} words of spoken text across all scenes)
 WORDS PER SCENE TARGET: ~${perScene} words (you may vary scene-to-scene — opening/closing are usually shorter)
 
@@ -315,7 +369,7 @@ RULES:
 - script is what Rick literally says out loud. Plain prose. No "[show dashboard]" stage directions in the script — those live in framingNotes, which is fixed.
 - Script density across all scenes should land within ±15% of ${totalWords} words.
 - Write in spoken register: shorter sentences than written prose, conversational transitions, occasional rhetorical asides — match the <voice> / <spokenVoice> guidance in the voice context.
-- Avoid the anti-patterns above. Especially: no "Hey guys", no "Hi I'm Rick excited to apply", no "today I want to talk about".
+- Avoid anti-patterns. Especially: no "Hey guys", no "Hi I'm Rick excited to apply", no "today I want to talk about".
 - Output JSON ONLY. No fences. No prose. Start with [ and end with ].
 
 SCENES TO WRITE SCRIPTS FOR (script length budget: ~${perScene} words each):

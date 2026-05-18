@@ -5,6 +5,7 @@ import health from './routes/health.js';
 import models from './routes/models.js';
 import dashboard from './routes/dashboard.js';
 import plan from './routes/plan.js';
+import workshop from './routes/workshop.js';
 import scenes from './routes/scenes.js';
 import newPlan from './routes/new-plan.js';
 import exportRoutes from './routes/export.js';
@@ -47,6 +48,9 @@ export function createApp(): Hono {
   // Export routes mounted before plan-detail so /plans/:id/export.txt
   // and /plans/:id/export both win against /plans/:id wildcard.
   app.route('/', exportRoutes);
+  // Workshop routes must come BEFORE plan so /plans/:id/workshop/hooks
+  // wins against the /plans/:id wildcard.
+  app.route('/', workshop);
   app.route('/', plan);
   app.route('/', listings);
   app.route('/', settings);

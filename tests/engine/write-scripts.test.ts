@@ -8,6 +8,7 @@ vi.mock('../../src/logger.js', () => ({
 import { createFakeFirestore, type FakeFirestore } from '../db/fake-firestore.js';
 import { createPlan } from '../../src/db/plans.js';
 import { createScene, listScenes } from '../../src/db/scenes.js';
+import { createHookDraft, setSelectedHookDraft } from '../../src/db/hook-drafts.js';
 import { writeScripts, generatePlanContent } from '../../src/engine/write-scripts.js';
 import { LLMProviderError, type LLMProvider } from '../../src/providers/index.js';
 import { NeurocoreError, type NeurocoreClient, type MemoryContextResponse } from '../../src/neurocore/index.js';
@@ -362,5 +363,117 @@ describe('generatePlanContent — composite Call 3 + Call 4', () => {
     });
     expect(result.scenesResult).toBeNull();
     expect(result.scriptsResult.scenes).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// youtube_advanced + hook variant integration
+// ---------------------------------------------------------------------------
+
+async function makeYoutubeAdvancedPlanWithHook(): Promise<{
+  planId: string;
+  scenes: Scene[];
+  hookScriptText: string;
+}> {
+  // Plan must be at a status from which scenes_generated is reachable.
+  // In the youtube_advanced flow, scripts are (re-)written from projects_matched.
+  // The selectedHookVariantId is set after hook selection, so when re-running
+  // scripts (e.g. after a hook pick), the plan is at projects_matched with
+  // the hook already selected.
+  const plan = await createPlan(
+    {
+      type: 'youtube_advanced',
+      title: 'Build a RAG chatbot',
+      targetRuntimeSeconds: 1800,
+      formatProfileId: 'claude_code_build_along',
+      status: 'requirements_reviewed',
+    },
+    asDb(),
+  );
+  // Advance to projects_matched so writeScripts can transition to scenes_generated,
+  // and set requirements + matchedProjects that writeScripts may read.
+  await fake.collection('plans').doc(plan.id).update({
+    status: 'projects_matched',
+    requirements: [{ skill: 'episode_plan', category: 'episode_outline', priority: 'must_show', evidence: '{}' }],
+    matchedProjects: [SAMPLE_MATCH],
+  });
+
+  const s1 = await createScene(plan.id, { title: 'Cold open', framingNotes: 'screenshare', description: 'hook', order: 1 }, asDb());
+  const s2 = await createScene(plan.id, { title: 'Build', framingNotes: 'screenshare', description: 'main work', order: 2 }, asDb());
+  const s3 = await createScene(plan.id, { title: 'Wrap', framingNotes: 'headshot', description: 'cta', order: 3 }, asDb());
+
+  const hookScriptText = 'This is the chosen hook verbatim text for scene one of the episode exactly as Rick picked it.';
+  const hook = await createHookDraft(
+    plan.id,
+    { archetype: 'pattern_interrupt', scriptText: hookScriptText, predictedRetention: 'good retention' },
+    asDb(),
+  );
+  await setSelectedHookDraft(plan.id, hook.id, asDb());
+  await fake.collection('plans').doc(plan.id).update({ selectedHookVariantId: hook.id });
+
+  return { planId: plan.id, scenes: [s1, s2, s3], hookScriptText };
+}
+
+describe('writeScripts — youtube_advanced with selectedHookVariantId', () => {
+  it('uses hook.scriptText verbatim for scene 1; scenes 2+ come from LLM', async () => {
+    const { planId, scenes, hookScriptText } = await makeYoutubeAdvancedPlanWithHook();
+
+    // LLM reply covers all scenes (scene 1 script will be replaced by hook).
+    const llmReply = JSON.stringify(
+      scenes.map((s, i) => ({
+        sceneId: s.id,
+        script: `LLM script for scene ${i + 1} here with some content for testing.`,
+        emphasisCues: [],
+        pacingNotes: '',
+        transitionNote: '',
+      })),
+    );
+    const provider = makeProvider([llmReply]);
+    const result = await writeScripts(planId, {
+      provider,
+      client: makeClient(VOICE_RESPONSE),
+      db: asDb(),
+    });
+
+    // Scene 1 (order=1) should have hook.scriptText, not LLM output.
+    const scene1 = result.scenes.find((s) => s.id === scenes[0]!.id)!;
+    expect(scene1.script).toBe(hookScriptText);
+
+    // Scenes 2+ come from LLM.
+    const scene2 = result.scenes.find((s) => s.id === scenes[1]!.id)!;
+    expect(scene2.script).toContain('LLM script for scene 2');
+
+    const scene3 = result.scenes.find((s) => s.id === scenes[2]!.id)!;
+    expect(scene3.script).toContain('LLM script for scene 3');
+
+    expect(result.plan.status).toBe('scenes_generated');
+  });
+});
+
+describe('writeScripts — youtube_advanced WITHOUT selectedHookVariantId', () => {
+  it('throws a descriptive error when plan is youtube_advanced with no hook selected', async () => {
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'No hook plan',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'claude_code_build_along',
+        status: 'requirements_reviewed',
+      },
+      asDb(),
+    );
+    // Set to projects_matched (valid status to transition to scenes_generated)
+    // but leave selectedHookVariantId null to trigger the youtube_advanced guard.
+    await fake.collection('plans').doc(plan.id).update({ status: 'projects_matched', selectedHookVariantId: null });
+
+    await createScene(plan.id, { title: 'Scene 1', framingNotes: 'headshot', description: 'intro' }, asDb());
+
+    await expect(
+      writeScripts(plan.id, {
+        provider: makeProvider(['[]']),
+        client: makeClient(VOICE_RESPONSE),
+        db: asDb(),
+      }),
+    ).rejects.toMatchObject({ code: 'DISALLOWED_TRANSITION' });
   });
 });

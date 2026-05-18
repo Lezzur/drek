@@ -6,6 +6,8 @@ import { PlanDetailPage } from '../views/plan-detail.js';
 import { detectRequirements } from '../engine/detect-requirements.js';
 import { matchProjects } from '../engine/match-projects.js';
 import { generatePlanContent } from '../engine/write-scripts.js';
+import { generateHookVariants } from '../engine/generate-hook-variants.js';
+import { selectHook } from '../engine/select-hook.js';
 import { runPipeline } from '../engine/pipeline.js';
 import { PlanningEngineError } from '../engine/errors.js';
 import { changePlanFormatProfile } from '../engine/change-format.js';
@@ -200,6 +202,78 @@ app.post('/plans/:id/change-format', async (c) => {
     }
     logger.error({ planId: id, err: (err as Error).message }, 'change-format: unexpected error');
     return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+/**
+ * POST /plans/:id/generate-hooks
+ *
+ * Calls generateHookVariants then redirects to the hook workshop via
+ * HX-Redirect so HTMX replaces the whole page.
+ *
+ * On PlanningEngineError returns 4xx with structured JSON.
+ */
+app.post('/plans/:id/generate-hooks', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await generateHookVariants(id);
+    c.header('HX-Redirect', `/plans/${id}/workshop/hooks`);
+    return c.text('', 200);
+  } catch (err) {
+    if (err instanceof PlanningEngineError) {
+      const status =
+        err.code === 'PLAN_NOT_FOUND' ? 404
+        : err.code === 'WRONG_PLAN_TYPE' || err.code === 'DISALLOWED_TRANSITION' || err.code === 'NO_FORMAT_PROFILE' || err.code === 'NO_LONG_FORM_DELIVERABLE' ? 400
+        : 500;
+      return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
+    }
+    logger.error({ planId: id, err: (err as Error).message }, 'generate-hooks: unexpected error');
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+  }
+});
+
+/**
+ * POST /plans/:id/select-hook
+ * Body: hookId (form-encoded or JSON)
+ *
+ * Calls selectHook then redirects to the hook workshop.
+ * On error returns 4xx structured JSON.
+ */
+app.post('/plans/:id/select-hook', async (c) => {
+  const id = c.req.param('id');
+  let hookId: string | undefined;
+  try {
+    // Support both form-encoded and JSON bodies.
+    const contentType = c.req.header('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      const body = await c.req.json<{ hookId?: string }>();
+      hookId = body.hookId;
+    } else {
+      const form = await c.req.parseBody();
+      hookId = form['hookId'] as string | undefined;
+    }
+  } catch {
+    return c.json({ error: { code: 'BAD_REQUEST', message: 'could not parse request body' } }, 400);
+  }
+
+  if (!hookId || typeof hookId !== 'string') {
+    return c.json({ error: { code: 'BAD_REQUEST', message: 'hookId is required' } }, 400);
+  }
+
+  try {
+    await selectHook(id, hookId);
+    c.header('HX-Redirect', `/plans/${id}/workshop/hooks`);
+    return c.text('', 200);
+  } catch (err) {
+    if (err instanceof PlanningEngineError) {
+      const status =
+        err.code === 'PLAN_NOT_FOUND' || err.code === 'HOOK_NOT_FOUND' ? 404
+        : err.code === 'DISALLOWED_TRANSITION' ? 400
+        : 500;
+      return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
+    }
+    logger.error({ planId: id, err: (err as Error).message }, 'select-hook: unexpected error');
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
   }
 });
 

@@ -62,10 +62,30 @@ const RuntimeBar: FC<{ targetSeconds: number; estimatedSeconds: number }> = ({
   );
 };
 
+// Statuses at or after hooks_generated (to show "Hook workshop →" link)
+const HOOKS_GENERATED_OR_LATER: PlanStatus[] = [
+  'hooks_generated',
+  'hook_selected',
+  'shot_list_generated',
+  'titles_generated',
+  'title_selected',
+  'thumbnails_generated',
+  'thumbnail_selected',
+  'shorts_extracted',
+  'finalized',
+  'exported',
+  'metadata_generated',
+];
+
 const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
   const canRunPipeline = plan.status !== 'dismissed';
   const canFinalize = plan.status === 'scenes_generated';
   const rerun = ['requirements_reviewed', 'projects_matched', 'scenes_generated', 'finalized', 'exported'].includes(plan.status);
+
+  const showGenerateHooks =
+    plan.type === 'youtube_advanced' && plan.status === 'scenes_generated';
+  const showHookWorkshopLink =
+    plan.type === 'youtube_advanced' && HOOKS_GENERATED_OR_LATER.includes(plan.status);
 
   return (
     <div class="card" style="margin-bottom:16px;">
@@ -84,6 +104,26 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
         >
           Run pipeline
         </button>
+        {showGenerateHooks ? (
+          <button
+            class="btn accent"
+            type="button"
+            hx-post={`/plans/${plan.id}/generate-hooks`}
+            hx-target="body"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+          >
+            Generate hooks
+          </button>
+        ) : null}
+        {showHookWorkshopLink ? (
+          <a
+            class="btn secondary"
+            href={`/plans/${plan.id}/workshop/hooks`}
+          >
+            Hook workshop →
+          </a>
+        ) : null}
         <span class="spacer" />
         <button
           class="btn"

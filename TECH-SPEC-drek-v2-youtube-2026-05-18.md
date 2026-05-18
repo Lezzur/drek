@@ -19,7 +19,7 @@ The v1 core (Hono + HTMX + Firestore + LLM provider abstraction + Neurocore clie
 1. A new top-level entity — `Deliverable` — that sits between `Plan` and the per-artifact scenes/scripts/metadata. A plan now produces many deliverables (one long-form + N Shorts + future formats), each bound to its own audience.
 2. A **Neurocore-side** `AudienceProfile` entity, fetched per-deliverable and injected verbatim into generation prompts.
 3. A **format profile** registry (TypeScript constants) defining structural rules per video format (build-along, tutorial, case study, etc.).
-4. Five new engine steps: hook variant generation, shot list generation, title variant generation, thumbnail concept generation, Shorts candidate extraction, publishing metadata generation.
+4. Seven new engine steps (Calls 5-11): hook variant generation, shot list generation, title variant generation, thumbnail concept generation, Shorts candidate extraction, publishing metadata generation, brief scoring (intake-side).
 5. An upstream **intake** module (named to avoid collision with the existing `pipeline.ts` LLM orchestrator) for sourcing and scoring candidate briefs from Upwork/Freelancer.
 6. A **workspace** module that materializes a deterministic folder layout per plan on disk.
 7. A **footage manifest** module for tracking recording sessions per plan.
@@ -171,7 +171,7 @@ export interface AudienceProfileClient {
 }
 ```
 
-- **Caching:** In-memory `Map<string, AudienceProfile>` keyed by profile ID. Populated on first fetch within a process. Invalidated by explicit `clearCache()` call only used in tests. Production restart re-warms the cache.
+- **Caching:** In-memory `Map<string, AudienceProfile>` keyed by profile ID. Populated on first fetch within a process. Cache entries are invalidated automatically when a fetch fails (Neurocore unreachable, 5xx, or 404) — the next attempt re-fetches from Neurocore. A `clearCache()` function is exposed for tests and for the health check's manual flush path; in steady-state production, the auto-invalidation-on-error path is what runs.
 - **Error handling:** AudienceProfile fetch failure is a **hard error** — no fallback to generic voice. The engine step that triggered the fetch returns a `LLMProviderError` subclass (`AudienceProfileUnavailableError`) and the route surfaces it to the UI with a retry button. Per PRD §6.4, this is intentional — silent fallback defeats the targeting.
 
 #### Component G: Format Profile Registry (NEW — DREK side)
@@ -223,7 +223,10 @@ export function listPipelineBriefs(opts?: { stage?: BriefStage; limit?: number }
 export function getPipelineBrief(id: string): Promise<PipelineBrief>;
 export function updatePipelineBriefScore(id: string, score: BriefScore): Promise<void>;
 export function transitionBriefStage(id: string, toStage: BriefStage): Promise<void>;
-export function promoteBriefToPlan(briefId: string, formatProfileId: string): Promise<string>; // returns planId
+export function promoteBriefToPlan(briefId: string, opts: {
+  formatProfileId: string;
+  audienceProfileId: string;     // bound to the auto-created long_form Deliverable
+}): Promise<string>;             // returns planId
 export async function scoreBriefViaLLM(briefId: string): Promise<BriefScore>;                  // engine step
 ```
 
@@ -278,6 +281,13 @@ export function deleteRecordingSession(id: string): Promise<void>;
 - **Responsibility:** CRUD for the `Deliverable` entity (per-artifact representation: long-form, Short, future). Bind deliverables to AudienceProfiles. Track per-deliverable status independently of plan status.
 - **Location:** `src/db/deliverables.ts`.
 - **Public functions:** Standard CRUD pattern matching v1's `src/db/plans.ts`.
+- **Lifecycle invariant — when the `long_form` Deliverable is created:** Every `youtube_advanced` plan gets exactly one `long_form` Deliverable auto-created at plan-creation time. There are two creation paths:
+  1. **Via promotion from a pipeline brief** — `promoteBriefToPlan()` creates the plan, then immediately creates a `long_form` Deliverable bound to the `audienceProfileId` passed in opts. Both writes happen in a single Firestore batch — partial failure leaves nothing persisted.
+  2. **Via the manual `youtube_advanced` new-plan form** — the form submission handler (`POST /plans` route, when `type === 'youtube_advanced'`) creates the plan and the `long_form` Deliverable in the same batch. The form requires `audienceProfileId` as an input (defaulting to `developer_longform`).
+
+  All plan-level convenience routes (`POST /plans/:id/generate-titles`, `/generate-thumbnails`, etc.) operate on this auto-created long-form Deliverable — they look it up via `deliverables.findByPlan(planId, { kind: 'long_form' })`. They throw `DeliverableNotFoundError` if no `long_form` Deliverable exists (should never happen for `youtube_advanced` plans given the invariant above).
+
+  `short_clip` Deliverables are created later by `extract-shorts` (Call 9) when Rick approves Short candidates — they do not exist at plan-creation time.
 
 #### Existing Components — v2 Modifications
 
@@ -859,7 +869,7 @@ Inherits v1 §10. v2 additions:
 - **AudienceProfile contract tests:** Mock Neurocore endpoints. Verify DREK's client correctly handles list/get/cache/error paths.
 - **Format profile registry tests:** Assert each format profile satisfies the `FormatProfile` interface. Assert default `claude_code_build_along` has the expected beats and runtime range.
 - **Composition prompt tests:** For each `(formatProfileId, audienceProfileId)` pair shipped at launch, render the system prompt and assert it includes both blocks in the correct order, with no overlap or duplication.
-- **Per-engine-step unit tests:** Each of the 7 new engine steps gets the same shape of tests as v1's engine steps (happy path, LLM error retry, bad JSON, audience-unavailable, plan-status-invalid).
+- **Per-engine-step unit tests:** Each of the 7 new engine steps (Calls 5-11) gets the same shape of tests as v1's engine steps (happy path, LLM error retry, bad JSON, audience-unavailable, plan-status-invalid).
 - **State machine tests:** Verify extended plan transitions table (§4.3). Negative tests for invalid transitions.
 - **Integration tests:**
   - End-to-end `youtube_advanced` plan: pipeline brief → score → promote → analyze → match → scenes → hooks → shot list → titles → thumbnails → shorts → finalize → publish metadata → export. With mocked LLM provider.
@@ -869,7 +879,7 @@ Inherits v1 §10. v2 additions:
   - Recording session logging + coverage computation.
 - **Migration test:** `scripts/migrate-youtube-to-youtube-lite.ts` run against a Firestore emulator with v1 fixture data; verify all `youtube` plans become `youtube_lite` and no other field changes.
 
-**Target coverage:** v1 maintains 308+ tests. v2 should add ~150-200 tests (8 new engine steps × ~6 tests each + entity CRUD × ~8 each + new view tests + integration). Total post-v2: ~500 tests.
+**Target coverage:** v1 maintains 308+ tests. v2 should add ~150-200 tests (7 new engine steps × ~6 tests each + entity CRUD × ~8 each + new view tests + integration). Total post-v2: ~500 tests.
 
 ## 11. Deployment and Rollout
 

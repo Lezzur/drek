@@ -18,6 +18,12 @@ function fakeScene(overrides: Partial<Scene> = {}): Scene {
     estimatedDurationSeconds: 12,
     projectRef: null,
     storyboardImageUrl: null,
+    beatTag: null,
+    primaryShot: null,
+    brollItems: [],
+    shotListItems: [],
+    onScreenTextOverlays: [],
+    cutPoints: [],
     ...overrides,
   };
 }

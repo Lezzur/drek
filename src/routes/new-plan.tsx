@@ -136,7 +136,9 @@ app.post('/plans/new/youtube', async (c) => {
 
   try {
     const plan = await createPlan({
-      type: 'youtube',
+      // 'youtube' renamed 'youtube_lite' in v2. The existing form covers the
+      // lite path; youtube_advanced has its own form added in M16/M17.
+      type: 'youtube_lite',
       title: parsed.data.title,
       targetRuntimeSeconds: parsed.data.targetRuntimeSeconds,
       userConstraints: parsed.data.userConstraints ?? null,

@@ -16,8 +16,8 @@ describe('getCompositionRules', () => {
     expect(getCompositionRules('cover_letter').mode).toBe('cover_letter');
   });
   it('returns YOUTUBE_RULES for youtube mode', () => {
-    expect(getCompositionRules('youtube')).toBe(YOUTUBE_RULES);
-    expect(getCompositionRules('youtube').mode).toBe('youtube');
+    expect(getCompositionRules('youtube_lite')).toBe(YOUTUBE_RULES);
+    expect(getCompositionRules('youtube_lite').mode).toBe('youtube_lite');
   });
 });
 

@@ -1,7 +1,11 @@
 import type { PlanType } from '../db/schemas.js';
 
 /**
- * Composition rules for DREK's two planning modes — verbatim from PRD §8.
+ * Composition rules for DREK's v1 planning modes — verbatim from PRD §8.
+ *
+ * v2 introduces a richer format-profile registry (`src/engine/format-profiles/`)
+ * for `youtube_advanced` plans. These constants continue to drive the
+ * `cover_letter` and `youtube_lite` paths unchanged.
  *
  * These define HOW each video is structured: tone, pacing, audience,
  * the literal structure template, the rules to follow, and the
@@ -55,7 +59,7 @@ export const COVER_LETTER_RULES: CompositionRules = {
 };
 
 export const YOUTUBE_RULES: CompositionRules = {
-  mode: 'youtube',
+  mode: 'youtube_lite',
   audience: 'Primary: potential clients — business owners, founders, ops leads who want AI systems and automations built for their businesses. Secondary: practitioners and aspiring builders. DREK does not optimize for practitioners at the expense of clients, but content must remain technically credible enough to not repel them.',
   tone: 'Authoritative but approachable, client-facing. Rick\'s personality carries the delivery — warmth, authority, occasional humor.',
   pacing: 'Deliberate, with room for emphasis and pauses. Not rushed — clients need to follow the business reasoning, not just the demo.',
@@ -83,8 +87,17 @@ export const YOUTUBE_RULES: CompositionRules = {
   wordsPerMinute: 150,
 };
 
+/**
+ * Pick v1 composition rules for a given plan type. `youtube_advanced` is NOT
+ * a v1 mode and throws — the v2 path uses the format-profile registry +
+ * compose-prompt.ts, not these constants.
+ */
 export function getCompositionRules(mode: PlanType): CompositionRules {
-  return mode === 'cover_letter' ? COVER_LETTER_RULES : YOUTUBE_RULES;
+  if (mode === 'cover_letter') return COVER_LETTER_RULES;
+  if (mode === 'youtube_lite') return YOUTUBE_RULES;
+  throw new Error(
+    `getCompositionRules(): mode ${mode} is not a v1 mode — youtube_advanced uses the format-profile registry, not v1 composition rules`,
+  );
 }
 
 /**

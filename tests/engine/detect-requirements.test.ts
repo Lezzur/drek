@@ -217,7 +217,7 @@ describe('detectRequirements — input / state validation', () => {
   it('throws WRONG_PLAN_TYPE for youtube plans', async () => {
     const plan = await createPlan(
       {
-        type: 'youtube',
+        type: 'youtube_lite',
         title: 'A manual topic',
         targetRuntimeSeconds: 600,
       },

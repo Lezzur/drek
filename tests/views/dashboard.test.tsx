@@ -18,6 +18,12 @@ function fakePlan(overrides: Partial<Plan> = {}): Plan {
     createdAt: new Date('2026-05-15T10:00:00Z'),
     updatedAt: new Date('2026-05-15T10:00:00Z'),
     exportedAt: null,
+    formatProfileId: null,
+    pipelineBriefId: null,
+    workspacePath: null,
+    selectedHookVariantId: null,
+    selectedTitleVariantId: null,
+    selectedThumbnailConceptId: null,
     ...overrides,
   };
 }
@@ -74,11 +80,11 @@ describe('DashboardPage', () => {
     const html = await toHtml(
       DashboardPage({
         plans: [],
-        filter: { type: 'youtube', status: 'projects_matched' },
+        filter: { type: 'youtube_lite', status: 'projects_matched' },
         lastPollAt: null,
       }),
     );
-    expect(html).toMatch(/<option value="youtube" selected[^>]*>YouTube<\/option>/);
+    expect(html).toMatch(/<option value="youtube_lite" selected[^>]*>YouTube<\/option>/);
     expect(html).toMatch(/<option value="projects_matched" selected[^>]*>Projects matched<\/option>/);
   });
 

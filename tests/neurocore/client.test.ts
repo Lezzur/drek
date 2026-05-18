@@ -203,7 +203,7 @@ describe('NeurocoreClient — getProjectContext', () => {
       }),
     );
     const client = new NeurocoreClient();
-    await client.getProjectContext({ planMode: 'youtube' });
+    await client.getProjectContext({ planMode: 'youtube_lite' });
     expect(fetchCalls[0]?.body).toMatchObject({ taskType: 'videoPlanYoutube' });
   });
 
@@ -247,7 +247,7 @@ describe('NeurocoreClient — getProjectContext', () => {
       }),
     );
     const client = new NeurocoreClient();
-    await client.getProjectContext({ planMode: 'youtube' });
+    await client.getProjectContext({ planMode: 'youtube_lite' });
     const scope = (fetchCalls[0]?.body as { scope?: Record<string, unknown> } | undefined)?.scope ?? {};
     expect(scope).not.toHaveProperty('contactId');
   });
@@ -305,7 +305,7 @@ describe('NeurocoreClient — getVoiceProfile', () => {
     );
     const client = new NeurocoreClient();
     await client.getVoiceProfile({ planMode: 'cover_letter' });
-    await client.getVoiceProfile({ planMode: 'youtube' });
+    await client.getVoiceProfile({ planMode: 'youtube_lite' });
     expect(fetchCalls[0]?.body).toMatchObject({ taskType: 'scriptCoverLetter' });
     expect(fetchCalls[1]?.body).toMatchObject({ taskType: 'scriptYoutube' });
   });

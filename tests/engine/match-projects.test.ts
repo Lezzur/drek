@@ -31,7 +31,7 @@ function makeProvider(responses: Array<string | { throws: Error }>): LLMProvider
 interface ClientStub {
   client: NeurocoreClient;
   calls: Array<{
-    planMode: 'cover_letter' | 'youtube';
+    planMode: 'cover_letter' | 'youtube_lite';
     contactId?: string;
     jobContextHint?: string;
     tokenBudget?: number;
@@ -44,7 +44,7 @@ function makeClient(
   const calls: ClientStub['calls'] = [];
   const client = {
     async getProjectContext(params: {
-      planMode: 'cover_letter' | 'youtube';
+      planMode: 'cover_letter' | 'youtube_lite';
       contactId?: string;
       jobContextHint?: string;
       tokenBudget?: number;
@@ -121,7 +121,7 @@ async function makeYouTubePlan(opts?: {
 }): Promise<string> {
   const plan = await createPlan(
     {
-      type: 'youtube',
+      type: 'youtube_lite',
       title: 'How I built a lead pipeline that auto-routes inbound leads',
       targetRuntimeSeconds: 600,
       status: opts?.status ?? 'requirements_reviewed',
@@ -184,7 +184,7 @@ describe('matchProjects — happy path', () => {
 
     expect(result.matchedProjects).toHaveLength(2);
     expect(result.plan.status).toBe('projects_matched');
-    expect(calls[0]?.planMode).toBe('youtube');
+    expect(calls[0]?.planMode).toBe('youtube_lite');
     expect(calls[0]?.contactId).toBeUndefined();
     expect(calls[0]?.jobContextHint).toContain('lead pipeline');
     expect(calls[0]?.jobContextHint).toContain('Focus on B2B');
@@ -369,7 +369,7 @@ describe('buildJobContextHint', () => {
 
   it('combines title and constraints for youtube', () => {
     const hint = _internal.buildJobContextHint({
-      type: 'youtube',
+      type: 'youtube_lite',
       title: 'How I built X',
       userConstraints: 'No music, fast cuts',
       requirements: [],

@@ -12,6 +12,7 @@ export interface DashboardProps {
 }
 
 const STATUS_LABELS: Record<PlanStatus, string> = {
+  // v1
   awaiting_review: 'Awaiting review',
   dismissed: 'Dismissed',
   requirements_reviewed: 'Requirements reviewed',
@@ -19,6 +20,16 @@ const STATUS_LABELS: Record<PlanStatus, string> = {
   scenes_generated: 'Scenes generated',
   finalized: 'Finalized',
   exported: 'Exported',
+  // v2 (youtube_advanced)
+  hooks_generated: 'Hooks generated',
+  hook_selected: 'Hook selected',
+  shot_list_generated: 'Shot list generated',
+  titles_generated: 'Titles generated',
+  title_selected: 'Title selected',
+  thumbnails_generated: 'Thumbnails generated',
+  thumbnail_selected: 'Thumbnail selected',
+  shorts_extracted: 'Shorts extracted',
+  metadata_generated: 'Metadata generated',
 };
 
 function formatDate(d: Date): string {
@@ -41,7 +52,8 @@ const FilterBar: FC<{ filter: DashboardProps['filter'] }> = ({ filter }) => {
           <select name="type">
             <option value="" selected={!filter.type}>All</option>
             <option value="cover_letter" selected={filter.type === 'cover_letter'}>Cover letter</option>
-            <option value="youtube" selected={filter.type === 'youtube'}>YouTube</option>
+            <option value="youtube_lite" selected={filter.type === 'youtube_lite'}>YouTube (lite)</option>
+            <option value="youtube_advanced" selected={filter.type === 'youtube_advanced'}>YouTube (advanced)</option>
           </select>
         </label>
         <label class="row" style="gap:6px;">

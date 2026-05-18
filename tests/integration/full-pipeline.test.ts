@@ -245,7 +245,7 @@ describe('youtube pipeline: match → generate (no requirements step)', () => {
   it('skips Call 1 and runs match → generate', async () => {
     const plan = await createPlan(
       {
-        type: 'youtube',
+        type: 'youtube_lite',
         title: 'How I built a lead pipeline that auto-routes inbound leads',
         targetRuntimeSeconds: 600,
         status: 'requirements_reviewed', // M10's youtube form sets this entry state

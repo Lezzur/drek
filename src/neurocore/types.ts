@@ -4,7 +4,14 @@
  * consumes a subset of what Neurocore exposes.
  */
 
-export type PlanMode = 'cover_letter' | 'youtube';
+/**
+ * Plan type used when DREK calls Neurocore for project context + voice
+ * profile. Both `youtube_lite` and `youtube_advanced` map to Neurocore's
+ * `videoPlanYoutube` / `scriptYoutube` task types — Neurocore doesn't yet
+ * differentiate the two formats on its side. If v2.1 introduces format-
+ * specific Neurocore task types, this mapping evolves in client.ts.
+ */
+export type PlanMode = 'cover_letter' | 'youtube_lite' | 'youtube_advanced';
 
 /** Response shape from POST /v1/memory/context. The systemBlock is XML-ish
  *  text we feed directly into LLM prompts; metadata is for logging/diagnostics. */

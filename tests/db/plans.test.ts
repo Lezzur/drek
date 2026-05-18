@@ -48,7 +48,7 @@ describe('createPlan', () => {
   it('honors an explicit initial status', async () => {
     const p = await createPlan(
       {
-        type: 'youtube',
+        type: 'youtube_lite',
         title: 'Manual topic',
         targetRuntimeSeconds: 600,
         status: 'requirements_reviewed',
@@ -84,7 +84,7 @@ describe('listPlans', () => {
     // small delay so createdAt timestamps differ deterministically
     await new Promise((r) => setTimeout(r, 5));
     const b = await createPlan(
-      { type: 'youtube', title: 'B', targetRuntimeSeconds: 600 },
+      { type: 'youtube_lite', title: 'B', targetRuntimeSeconds: 600 },
       asDb(),
     );
     const { plans } = await listPlans({}, asDb());
@@ -97,10 +97,10 @@ describe('listPlans', () => {
       asDb(),
     );
     const b = await createPlan(
-      { type: 'youtube', title: 'B', targetRuntimeSeconds: 600 },
+      { type: 'youtube_lite', title: 'B', targetRuntimeSeconds: 600 },
       asDb(),
     );
-    const { plans } = await listPlans({ type: 'youtube' }, asDb());
+    const { plans } = await listPlans({ type: 'youtube_lite' }, asDb());
     expect(plans).toHaveLength(1);
     expect(plans[0]?.id).toBe(b.id);
   });

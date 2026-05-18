@@ -10,6 +10,7 @@ export interface PlanDetailProps {
 }
 
 const STATUS_LABELS: Record<PlanStatus, string> = {
+  // v1
   awaiting_review: 'Awaiting review',
   dismissed: 'Dismissed',
   requirements_reviewed: 'Requirements reviewed',
@@ -17,6 +18,16 @@ const STATUS_LABELS: Record<PlanStatus, string> = {
   scenes_generated: 'Scenes generated',
   finalized: 'Finalized',
   exported: 'Exported',
+  // v2 (youtube_advanced)
+  hooks_generated: 'Hooks generated',
+  hook_selected: 'Hook selected',
+  shot_list_generated: 'Shot list generated',
+  titles_generated: 'Titles generated',
+  title_selected: 'Title selected',
+  thumbnails_generated: 'Thumbnails generated',
+  thumbnail_selected: 'Thumbnail selected',
+  shorts_extracted: 'Shorts extracted',
+  metadata_generated: 'Metadata generated',
 };
 
 /**

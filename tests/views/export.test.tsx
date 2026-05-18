@@ -18,6 +18,12 @@ function fakePlan(overrides: Partial<Plan> = {}): Plan {
     createdAt: new Date('2026-05-15T10:00:00Z'),
     updatedAt: new Date('2026-05-15T10:00:00Z'),
     exportedAt: null,
+    formatProfileId: null,
+    pipelineBriefId: null,
+    workspacePath: null,
+    selectedHookVariantId: null,
+    selectedTitleVariantId: null,
+    selectedThumbnailConceptId: null,
     ...overrides,
   };
 }
@@ -38,6 +44,12 @@ function fakeScene(overrides: Partial<Scene> = {}): Scene {
     estimatedDurationSeconds: 10,
     projectRef: null,
     storyboardImageUrl: null,
+    beatTag: null,
+    primaryShot: null,
+    brollItems: [],
+    shotListItems: [],
+    onScreenTextOverlays: [],
+    cutPoints: [],
     ...overrides,
   };
 }
@@ -62,7 +74,7 @@ describe('ShootInstructionsPage', () => {
   it('renders youtube audience callout for youtube plans', () => {
     const html = toHtml(
       ShootInstructionsPage({
-        plan: fakePlan({ type: 'youtube' }),
+        plan: fakePlan({ type: 'youtube_lite' }),
         scenes: [],
         stale: false,
       }),

@@ -110,6 +110,10 @@ const THUMBNAILS_GENERATED_OR_LATER: PlanStatus[] = [
   'metadata_generated',
 ];
 
+const METADATA_GENERATED_OR_LATER: PlanStatus[] = [
+  'metadata_generated',
+];
+
 const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
   const canRunPipeline = plan.status !== 'dismissed';
   const canFinalize = plan.status === 'scenes_generated';
@@ -134,6 +138,11 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
   const showThumbnailWorkshopLink =
     plan.type === 'youtube_advanced' &&
     THUMBNAILS_GENERATED_OR_LATER.includes(plan.status);
+  const showGenerateMetadata =
+    plan.type === 'youtube_advanced' && plan.status === 'finalized';
+  const showPublishLink =
+    plan.type === 'youtube_advanced' &&
+    METADATA_GENERATED_OR_LATER.includes(plan.status);
 
   return (
     <div class="card" style="margin-bottom:16px;">
@@ -231,6 +240,23 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
         {showThumbnailWorkshopLink ? (
           <a class="btn secondary" href={`/plans/${plan.id}/workshop/thumbnails`}>
             Thumbnail workshop →
+          </a>
+        ) : null}
+        {showGenerateMetadata ? (
+          <button
+            class="btn accent"
+            type="button"
+            hx-post={`/plans/${plan.id}/generate-publish-metadata`}
+            hx-target="body"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+          >
+            Generate metadata
+          </button>
+        ) : null}
+        {showPublishLink ? (
+          <a class="btn secondary" href={`/plans/${plan.id}/publish`}>
+            Publishing →
           </a>
         ) : null}
         {plan.type === 'youtube_advanced' ? (

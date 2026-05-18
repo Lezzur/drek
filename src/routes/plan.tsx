@@ -11,6 +11,7 @@ import { selectHook } from '../engine/select-hook.js';
 import { generateShotList } from '../engine/generate-shot-list.js';
 import { generateTitleVariants } from '../engine/generate-title-variants.js';
 import { generateThumbnailConcepts } from '../engine/generate-thumbnail-concepts.js';
+import { generatePublishMetadata } from '../engine/generate-publish-metadata.js';
 import { findLongFormDeliverable } from '../db/deliverables.js';
 import { runPipeline } from '../engine/pipeline.js';
 import { PlanningEngineError } from '../engine/errors.js';
@@ -368,6 +369,49 @@ app.post('/plans/:id/generate-thumbnails', async (c) => {
       return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
     }
     logger.error({ planId: id, err: (err as Error).message }, 'generate-thumbnails: unexpected error');
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+  }
+});
+
+/**
+ * GET /plans/:id/publish — convenience redirect to the long-form
+ * deliverable's publish view. Used by the "Publishing →" link on the
+ * plan detail page; plan-detail doesn't know the long-form id, but the
+ * router can resolve it.
+ */
+app.get('/plans/:id/publish', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const longForm = await findLongFormDeliverable(id);
+    return c.redirect(`/deliverables/${longForm.id}/publish`);
+  } catch (err) {
+    logger.warn({ planId: id, err: (err as Error).message }, 'publish link: long-form lookup failed');
+    return c.html('<h1>404 — no long-form deliverable for this plan</h1>', 404);
+  }
+});
+
+/**
+ * POST /plans/:id/generate-publish-metadata — fires Call 10 for the
+ * long-form deliverable. Pre-conditions enforced by the engine:
+ * plan must be finalized, deliverable must have selected title +
+ * thumbnail.
+ */
+app.post('/plans/:id/generate-publish-metadata', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const longForm = await findLongFormDeliverable(id);
+    await generatePublishMetadata(longForm.id);
+    c.header('HX-Redirect', `/deliverables/${longForm.id}/publish`);
+    return c.text('', 200);
+  } catch (err) {
+    if (err instanceof PlanningEngineError) {
+      const status =
+        err.code === 'PLAN_NOT_FOUND' ? 404
+        : err.code === 'WRONG_PLAN_TYPE' || err.code === 'DISALLOWED_TRANSITION' || err.code === 'NO_FORMAT_PROFILE' || err.code === 'NO_REQUIREMENTS' || err.code === 'NO_LONG_FORM_DELIVERABLE' ? 400
+        : 500;
+      return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
+    }
+    logger.error({ planId: id, err: (err as Error).message }, 'generate-publish-metadata: unexpected error');
     return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
   }
 });

@@ -8,8 +8,11 @@ and exports shoot instructions you record from.
 Specs live next to the code:
 
 - [`DISCOVERY-drek.md`](./DISCOVERY-drek.md) — problem space, decisions
-- [`PRD-drek-2026-05-15.md`](./PRD-drek-2026-05-15.md) — features, user flows, data model
-- [`TECH-SPEC-drek-2026-05-15.md`](./TECH-SPEC-drek-2026-05-15.md) — architecture, milestones
+- [`PRD-drek-2026-05-15.md`](./PRD-drek-2026-05-15.md) — v1 features, user flows, data model
+- [`TECH-SPEC-drek-2026-05-15.md`](./TECH-SPEC-drek-2026-05-15.md) — v1 architecture, milestones
+- [`PRD-drek-v2-youtube-2026-05-18.md`](./PRD-drek-v2-youtube-2026-05-18.md) — v2 YouTube channel operating system
+- [`TECH-SPEC-drek-v2-youtube-2026-05-18.md`](./TECH-SPEC-drek-v2-youtube-2026-05-18.md) — v2 architecture, 9 module additions
+- [`CHANGELOG.md`](./CHANGELOG.md) — release notes
 
 ## Stack
 
@@ -161,17 +164,126 @@ Loom open. Rick records from the printed/screen-side shoot instructions.
 YouTube plans skip Call 1 (no listing to analyze) and start directly
 in `requirements_reviewed`. Everything else is identical.
 
+## v2 — YouTube Channel Operating System
+
+v2 extends DREK from "writes scripts" to "runs a YouTube channel." The
+existing v1 surface (cover-letter + youtube-lite plans) is unchanged.
+The new `youtube_advanced` plan type drives a 9-module pipeline:
+
+| Module | What it produces |
+|---|---|
+| **Intake** | Pipeline briefs scored by LLM (`PipelineBrief` entity) — promote-to-plan creates the Plan + long-form Deliverable in one batch |
+| **Workspace** | Per-plan folder under `$WORKSPACE_ROOT/<planId>-<slug>/` with subdirs `brief/ briefs/ scripts/ shotlist/ recordings/ assets/ exports/` (security-hardened: traversal-rejecting slug regex, atomic temp+rename writes, lstat symlink rejection, 10MB cap) |
+| **Format profiles** | Local TypeScript registry of episode-shape templates (`claude_code_build_along` ships; 6 more deferred to v2.1). Plus AudienceProfile from Neurocore — every v2 LLM call composes both via `buildSystemPrompt({ formatProfile, audienceProfile })` |
+| **Hook engineering** | 3-4 hook variants per episode, Rick picks one; scene 1's script becomes the selected hook verbatim |
+| **Shot list** | Per-scene primary shot + B-roll + on-screen text + cut points, batched per plan |
+| **Title workshop** | 5-10 title variants per Deliverable (long-form + per Short); Rick picks |
+| **Thumbnail workshop** | 3-5 text-only thumbnail concepts (composition + textHook + palette + assetsRequired) — actual image production stays in Figma/Photoshop/Canva |
+| **Publishing metadata** | Description + chapters (timestamps auto-computed from scene durations, labels LLM-named) + 10-15 tags + pinned comment + end-screen suggestion. Plain-text bundle paste-ready for YouTube Studio |
+| **Shorts extractor** | 3-5 candidate Shorts from the long-form scripts using a hardcoded beat-importance heuristic; approving a candidate spawns a short_clip Deliverable bound to `business_owner_shorts` audience |
+| **Footage manifest** | Recording session log with per-scene coverage tracking |
+
+When Rick marks a Deliverable as published with a YouTube URL,
+DREK fires `script.published` to Neurocore (best-effort — local
+publish never blocks on signal failure) including the
+selectedHookArchetype / selectedTitleArchetype / selectedThumbnail
+composition so Neurocore can correlate creative choices with
+eventual performance.
+
+### How a YouTube episode gets made (v2)
+
+```
+Brief in intake (manual paste OR future Neurocore signal)
+    │
+    ▼  Call 11: LLM scoring (visualOutcome / storyPotential / scopeFit / audienceMatch)
+Rick promotes to youtube_advanced plan
+    │  (one batch: Plan + long-form Deliverable + workspace folder)
+    ▼
+Call 1 (v2): episode requirements from brief
+    │
+    ▼
+Call 2: project matches from Neurocore catalog
+    │
+    ▼
+Call 3 (v2): scene cards tagged with format-profile beats
+    │
+    ▼
+Call 5: hook variants → Rick picks one in the Hook Workshop
+    │
+    ▼
+Call 4 (v2): scripts written, scene 1 = selected hook verbatim
+    │
+    ▼
+Call 6: shot list (primary + B-roll + cut points + on-screen text)
+    │
+    ▼
+Call 7: title variants → Rick picks one in the Title Workshop
+    │
+    ▼
+Call 8: thumbnail concepts → Rick picks one in the Thumbnail Workshop
+    │
+    ▼
+Call 9: Shorts extraction → Rick approves N → each becomes a Deliverable
+    │
+    ▼  (Rick edits scripts in workshop UIs, logs recording sessions as he shoots)
+Rick finalizes plan
+    │
+    ▼
+Call 10: publishing metadata (description + chapters + tags + pinned + endscreen)
+    │
+    ▼
+Per Deliverable: title → thumbnail → publish metadata → export bundle
+    │
+    ▼
+Rick uploads to YouTube, pastes URL into "Mark as published"
+    │
+    ▼
+script.published signal → Neurocore (audience+hook+title+thumb correlated with future viewcounts)
+```
+
+### v2 env additions
+
+| Var | Purpose |
+|---|---|
+| `WORKSPACE_ROOT` | Absolute path to the per-plan workspace root (Rick's setup: `F:\drek-workspace`). Must exist and be writable. Health-checked via `validateWorkspaceRoot()`. |
+
+### v2 status enum additions
+
+The Plan state machine adds 9 statuses (only reachable from
+`youtube_advanced` plans; v1 plans never visit them):
+
+```
+hooks_generated → hook_selected → shot_list_generated →
+titles_generated → title_selected → thumbnails_generated →
+thumbnail_selected → shorts_extracted → finalized →
+metadata_generated → exported
+```
+
+### Format-profile / mode-blending guarantee
+
+`buildSystemPrompt()` is the single composition gate. It asserts that
+exactly one of `{v1CompositionRules}` OR `{formatProfile +
+audienceProfile}` is provided — if both or neither are passed it
+throws `PromptCompositionError`. This makes v1↔v2 mode-blending
+impossible by construction.
+
 ## Test coverage
 
 ```bash
 npm test
 ```
 
-300+ tests covering: env validation, all four LLM provider error paths,
-Neurocore client retry + auth + timeout, Firestore CRUD + scene reorder
-+ plan transition rules, every engine step's happy/retry/failure paths,
-polling cycle (dedup, partial failure, mutex, disabled state, ack
-failure), HTML views (every page + HTMX partial), and end-to-end
-integration of the full pipeline including a polling-triggered run
-and mid-pipeline failure recovery (skipScenes=true).
+800+ tests covering: env validation, all four LLM provider error paths,
+Neurocore client retry + auth + timeout + script.published signal,
+Firestore CRUD + scene reorder + plan transition rules, every engine
+step's happy/retry/failure paths (v1 + v2), polling cycle (dedup,
+partial failure, mutex, disabled state, ack failure), workspace
+security (path traversal, slug validation, atomic writes,
+WORKSPACE_ROOT health), HTML views (every page + HTMX partial,
+including all v2 workshop UIs), and end-to-end integration of both
+the v1 pipeline AND the full v2 youtube_advanced flow
+(`tests/integration/v2-full-pipeline.test.ts`: long-form happy path,
+Shorts per-deliverable, change-format wipe-and-revert, AudienceProfile
+unavailability, published-signal failure non-fatal, URL allowlist
+enforcement).
 

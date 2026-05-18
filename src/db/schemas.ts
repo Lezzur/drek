@@ -586,7 +586,7 @@ export type TitleConcept = z.infer<typeof titleConceptSchema>;
 
 export const titleConceptCreateSchema = titleConceptSchema
   .omit({ id: true, createdAt: true })
-  .partial({ selected: true });
+  .partial({ selected: true, keywordsSurfaced: true });
 export type TitleConceptCreate = z.infer<typeof titleConceptCreateSchema>;
 
 // ---------------------------------------------------------------------------
@@ -622,7 +622,7 @@ export type ThumbnailConcept = z.infer<typeof thumbnailConceptSchema>;
 
 export const thumbnailConceptCreateSchema = thumbnailConceptSchema
   .omit({ id: true, createdAt: true })
-  .partial({ selected: true });
+  .partial({ selected: true, assetsRequired: true, expression: true });
 export type ThumbnailConceptCreate = z.infer<typeof thumbnailConceptCreateSchema>;
 
 // ---------------------------------------------------------------------------

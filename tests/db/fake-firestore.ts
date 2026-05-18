@@ -49,6 +49,7 @@ interface CollectionRef extends Query {
 }
 
 interface Batch {
+  set(ref: DocRef, data: DocData, opts?: { merge?: boolean }): Batch;
   update(ref: DocRef, data: DocData): Batch;
   delete(ref: DocRef): Batch;
   commit(): Promise<void>;
@@ -272,6 +273,10 @@ export function createFakeFirestore(): FakeFirestore {
     batch(): Batch {
       const ops: Array<() => Promise<void>> = [];
       const b: Batch = {
+        set(ref, data, opts) {
+          ops.push(() => ref.set(data, opts));
+          return b;
+        },
         update(ref, data) {
           ops.push(() => ref.update(data));
           return b;

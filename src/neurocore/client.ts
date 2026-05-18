@@ -7,6 +7,7 @@ import type {
   PendingListing,
   PendingListingsResponse,
   PlanMode,
+  PublishedScriptSignal,
 } from './types.js';
 
 const DEFAULT_RETRY_BACKOFF_MS = 2_000;
@@ -176,6 +177,29 @@ export class NeurocoreClient {
         occurredAt: new Date().toISOString(),
       },
       { idempotencyKey: `drek-script-approved-${payload.planId}` },
+    );
+  }
+
+  /**
+   * Fire-and-forget signal when Rick marks a Deliverable as published.
+   * Idempotency key is keyed per-deliverable so re-publishing the same
+   * Deliverable (e.g., URL correction) collapses on Neurocore's side.
+   *
+   * The route layer wraps this in try/catch so a signal failure never
+   * blocks the local published state transition — Neurocore degradation
+   * is non-fatal here, same as sendApprovedScript.
+   */
+  async sendPublishedScript(payload: PublishedScriptSignal): Promise<void> {
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'script.published',
+        payload,
+        occurredAt: new Date().toISOString(),
+      },
+      { idempotencyKey: `drek-script-published-${payload.deliverableId}` },
     );
   }
 

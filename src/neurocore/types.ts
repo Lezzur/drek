@@ -61,3 +61,20 @@ export interface ApprovedScriptSignal {
     wasEdited: boolean;
   }>;
 }
+
+/** Published-script signal payload — fired when Rick marks a Deliverable as
+ *  published with a YouTube URL. Includes the archetype/composition choices
+ *  so Neurocore can correlate hook/title/thumbnail choices with eventual
+ *  performance data. */
+export interface PublishedScriptSignal {
+  planId: string;
+  deliverableId: string;
+  kind: 'long_form' | 'short_clip';
+  audienceProfileId: string;
+  youtubeUrl: string;
+  title: string;
+  selectedHookArchetype?: string;
+  selectedTitleArchetype?: string;
+  selectedThumbnailComposition?: string;
+  publishedAt: string;
+}

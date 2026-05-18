@@ -404,6 +404,79 @@ describe('NeurocoreClient — sendApprovedScript', () => {
   });
 });
 
+describe('NeurocoreClient — sendPublishedScript', () => {
+  it('sends a script.published signal with per-deliverable idempotency', async () => {
+    queueResponse(jsonResponse(202, { signalId: 'sig_99', queued: true }));
+    const client = new NeurocoreClient();
+    await client.sendPublishedScript({
+      planId: 'plan_1',
+      deliverableId: 'del_1',
+      kind: 'long_form',
+      audienceProfileId: 'developer_longform',
+      youtubeUrl: 'https://www.youtube.com/watch?v=abc123',
+      title: 'My Episode',
+      selectedHookArchetype: 'bold_claim',
+      selectedTitleArchetype: 'curiosity_gap',
+      selectedThumbnailComposition: 'split: terminal left, headshot right',
+      publishedAt: '2026-05-18T15:00:00.000Z',
+    });
+    expect(fetchCalls[0]?.url).toBe('http://localhost:3100/v1/memory/signals');
+    expect(fetchCalls[0]?.method).toBe('POST');
+    expect(fetchCalls[0]?.headers['idempotency-key']).toBe(
+      'drek-script-published-del_1',
+    );
+    expect(fetchCalls[0]?.body).toMatchObject({
+      appId: 'drek',
+      signalType: 'script.published',
+      payload: {
+        planId: 'plan_1',
+        deliverableId: 'del_1',
+        kind: 'long_form',
+        audienceProfileId: 'developer_longform',
+        youtubeUrl: 'https://www.youtube.com/watch?v=abc123',
+        title: 'My Episode',
+        selectedHookArchetype: 'bold_claim',
+        selectedTitleArchetype: 'curiosity_gap',
+        selectedThumbnailComposition: 'split: terminal left, headshot right',
+        publishedAt: '2026-05-18T15:00:00.000Z',
+      },
+    });
+  });
+
+  it('retries once on 502 SERVER_ERROR', async () => {
+    queueResponse(jsonResponse(502, { error: { code: 'SERVER_ERROR', message: 'bad gw' } }));
+    queueResponse(jsonResponse(202, { signalId: 'sig_99', queued: true }));
+    const client = new NeurocoreClient({ retryBackoffMs: 0 });
+    await client.sendPublishedScript({
+      planId: 'plan_1',
+      deliverableId: 'del_1',
+      kind: 'short_clip',
+      audienceProfileId: 'business_owner_shorts',
+      youtubeUrl: 'https://youtu.be/abc',
+      title: 'Short',
+      publishedAt: '2026-05-18T15:00:00.000Z',
+    });
+    expect(fetchCalls).toHaveLength(2);
+  });
+
+  it('does NOT retry on 400 BAD_REQUEST (caller bug)', async () => {
+    queueResponse(jsonResponse(400, { error: { code: 'BAD_REQUEST', message: 'bad' } }));
+    const client = new NeurocoreClient({ retryBackoffMs: 0 });
+    await expect(
+      client.sendPublishedScript({
+        planId: 'plan_1',
+        deliverableId: 'del_1',
+        kind: 'long_form',
+        audienceProfileId: 'developer_longform',
+        youtubeUrl: 'https://www.youtube.com/watch?v=x',
+        title: 'x',
+        publishedAt: '2026-05-18T15:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(fetchCalls).toHaveLength(1);
+  });
+});
+
 describe('NeurocoreClient — error mapping', () => {
   it('maps 401 to UNAUTHENTICATED and does not retry', async () => {
     queueResponse(

@@ -269,6 +269,11 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
             Footage →
           </a>
         ) : null}
+        {plan.type === 'youtube_advanced' ? (
+          <a class="btn secondary" href={`/plans/${plan.id}/deliverables`}>
+            Deliverables →
+          </a>
+        ) : null}
         <span class="spacer" />
         <button
           class="btn"

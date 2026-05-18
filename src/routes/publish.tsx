@@ -11,6 +11,10 @@ import {
   generatePublishMetadata,
   renderPublishBundle,
 } from '../engine/generate-publish-metadata.js';
+import {
+  publishDeliverable,
+  InvalidYouTubeUrlError,
+} from '../engine/publish-deliverable.js';
 import { PlanningEngineError } from '../engine/errors.js';
 import { PublishMetadataView } from '../views/publish.js';
 import { publishMetadataPatchSchema } from '../db/schemas.js';
@@ -145,6 +149,53 @@ app.patch('/deliverables/:deliverableId/publish', async (c) => {
 
   c.header('HX-Redirect', `/deliverables/${id}/publish`);
   return c.text('', 200);
+});
+
+/**
+ * POST /deliverables/:deliverableId/publish — mark this deliverable as
+ * published. Body: youtubeUrl. Fires the script.published signal to
+ * Neurocore (best-effort). On success, re-renders the publish view.
+ */
+app.post('/deliverables/:deliverableId/publish', async (c) => {
+  const id = c.req.param('deliverableId');
+  let youtubeUrl: string | undefined;
+  const contentType = c.req.header('content-type') ?? '';
+  try {
+    if (contentType.includes('application/json')) {
+      const body = await c.req.json<{ youtubeUrl?: string }>();
+      youtubeUrl = body.youtubeUrl;
+    } else {
+      const form = await c.req.parseBody();
+      youtubeUrl = form['youtubeUrl'] as string | undefined;
+    }
+  } catch {
+    return c.json({ error: { code: 'BAD_REQUEST', message: 'could not parse body' } }, 400);
+  }
+
+  if (!youtubeUrl) {
+    return c.json({ error: { code: 'BAD_REQUEST', message: 'youtubeUrl required' } }, 400);
+  }
+
+  try {
+    await publishDeliverable(id, youtubeUrl);
+    c.header('HX-Redirect', `/deliverables/${id}/publish`);
+    return c.text('', 200);
+  } catch (err) {
+    if (err instanceof InvalidYouTubeUrlError) {
+      return c.json(
+        { error: { code: 'INVALID_INPUT', message: err.message, field: 'youtubeUrl' } },
+        400,
+      );
+    }
+    if (err instanceof PlanningEngineError) {
+      return c.json(
+        { error: { code: err.code, message: err.message } },
+        planningErrToHttp(err) as 400 | 404 | 500,
+      );
+    }
+    logger.error({ deliverableId: id, err: (err as Error).message }, 'publish deliverable failed');
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+  }
 });
 
 /**

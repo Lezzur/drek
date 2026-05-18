@@ -221,6 +221,62 @@ const EndScreenBlock: FC<{
   );
 };
 
+const PublishStatusBlock: FC<{ deliverable: Deliverable }> = ({ deliverable }) => {
+  if (deliverable.status === 'published') {
+    return (
+      <div
+        class="card"
+        style="margin-bottom:16px; border-left:4px solid var(--green-fg);"
+      >
+        <h3 class="section-label">Published</h3>
+        <div style="font-size:14px;">
+          <a
+            href={deliverable.youtubeUrl ?? '#'}
+            target="_blank"
+            rel="noopener noreferrer"
+            style="color:var(--link); word-break:break-all;"
+          >
+            {deliverable.youtubeUrl ?? '(no URL)'}
+          </a>
+        </div>
+        {deliverable.publishedAt ? (
+          <div class="muted" style="font-size:12px; margin-top:4px;">
+            Published {new Date(deliverable.publishedAt).toLocaleString('en-US')}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <div class="card" style="margin-bottom:16px;">
+      <h3 class="section-label">Mark as published</h3>
+      <div class="muted" style="font-size:13px; margin-bottom:8px;">
+        After uploading to YouTube, paste the URL here. DREK fires the
+        script.published signal so Neurocore can correlate hook/title/thumb
+        choices with eventual view counts.
+      </div>
+      <form
+        hx-post={`/deliverables/${deliverable.id}/publish`}
+        hx-target="body"
+        hx-swap="outerHTML"
+        hx-disabled-elt="find button"
+        style="display:flex; gap:8px; align-items:center;"
+      >
+        <input
+          type="url"
+          name="youtubeUrl"
+          required
+          placeholder="https://www.youtube.com/watch?v=..."
+          style="flex:1; font-family:ui-monospace,monospace; font-size:13px;"
+        />
+        <button class="btn accent" type="submit">
+          Mark published
+        </button>
+      </form>
+    </div>
+  );
+};
+
 const ActionStrip: FC<{
   deliverable: Deliverable;
   hasMetadata: boolean;
@@ -301,6 +357,8 @@ export const PublishMetadataView: FC<PublishMetadataViewProps> = ({
       </div>
 
       <ActionStrip deliverable={deliverable} hasMetadata={!!metadata} />
+
+      {metadata ? <PublishStatusBlock deliverable={deliverable} /> : null}
 
       {metadata ? (
         <>

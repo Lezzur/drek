@@ -8,6 +8,7 @@ const mockGetPublishMetadata = vi.fn();
 const mockPatchPublishMetadata = vi.fn();
 const mockGetSelectedTitleConcept = vi.fn();
 const mockGeneratePublishMetadata = vi.fn();
+const mockPublishDeliverable = vi.fn();
 
 vi.mock('../../src/db/plans.js', () => ({
   getPlan: (...args: unknown[]) => mockGetPlan(...args),
@@ -32,6 +33,15 @@ vi.mock('../../src/engine/generate-publish-metadata.js', async (importOriginal) 
   return {
     ...actual,
     generatePublishMetadata: (...args: unknown[]) => mockGeneratePublishMetadata(...args),
+  };
+});
+
+vi.mock('../../src/engine/publish-deliverable.js', async (importOriginal) => {
+  // Keep YOUTUBE_URL_REGEX + InvalidYouTubeUrlError real for URL validation.
+  const actual = await importOriginal<typeof import('../../src/engine/publish-deliverable.js')>();
+  return {
+    ...actual,
+    publishDeliverable: (...args: unknown[]) => mockPublishDeliverable(...args),
   };
 });
 
@@ -113,6 +123,7 @@ beforeEach(() => {
   mockPatchPublishMetadata.mockReset();
   mockGetSelectedTitleConcept.mockReset();
   mockGeneratePublishMetadata.mockReset();
+  mockPublishDeliverable.mockReset();
 });
 
 describe('GET /deliverables/:id/publish', () => {
@@ -248,6 +259,70 @@ describe('PATCH /deliverables/:id/publish', () => {
       body: JSON.stringify({ pinnedComment: 'new pc' }),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /deliverables/:id/publish (mark as published)', () => {
+  it('marks deliverable published with valid URL and redirects', async () => {
+    mockPublishDeliverable.mockResolvedValue({ deliverableId: 'del_1', signalSent: true });
+
+    const res = await createApp().request('/deliverables/del_1/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'youtubeUrl=' + encodeURIComponent('https://www.youtube.com/watch?v=abc'),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('HX-Redirect')).toBe('/deliverables/del_1/publish');
+    expect(mockPublishDeliverable).toHaveBeenCalledWith(
+      'del_1',
+      'https://www.youtube.com/watch?v=abc',
+    );
+  });
+
+  it('rejects invalid YouTube URL with 400 + field hint', async () => {
+    const { InvalidYouTubeUrlError } = await import(
+      '../../src/engine/publish-deliverable.js'
+    );
+    mockPublishDeliverable.mockRejectedValue(
+      new InvalidYouTubeUrlError('https://evil.com/x'),
+    );
+
+    const res = await createApp().request('/deliverables/del_1/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ youtubeUrl: 'https://evil.com/x' }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; field?: string } };
+    expect(body.error.code).toBe('INVALID_INPUT');
+    expect(body.error.field).toBe('youtubeUrl');
+  });
+
+  it('400 when youtubeUrl missing', async () => {
+    const res = await createApp().request('/deliverables/del_1/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('signal failure does not fail the route (engine returns signalSent=false)', async () => {
+    // The engine swallows signal errors and returns signalSent=false, so
+    // the route just sees a successful resolve.
+    mockPublishDeliverable.mockResolvedValue({
+      deliverableId: 'del_1',
+      signalSent: false,
+      signalError: 'UNREACHABLE: down',
+    });
+
+    const res = await createApp().request('/deliverables/del_1/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ youtubeUrl: 'https://youtu.be/abc' }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('HX-Redirect')).toBe('/deliverables/del_1/publish');
   });
 });
 

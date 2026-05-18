@@ -195,6 +195,7 @@ export const SceneCard: FC<SceneCardProps> = ({
         {scene.projectRef ? (
           <div class="scene-project-ref">project: <code>{scene.projectRef}</code></div>
         ) : null}
+        <ShotListBlock scene={scene} />
       </div>
 
       <div style="padding-top:2px;">
@@ -210,6 +211,105 @@ export const SceneCard: FC<SceneCardProps> = ({
         </button>
       </div>
     </div>
+  );
+};
+
+/**
+ * Read-only shot list section for v2 scenes. Renders only when the scene
+ * has at least one shot-list field populated (i.e., generate-shot-list
+ * has run for this plan). Wraps everything in a <details> for collapse,
+ * defaulting open the first time but Rick can close it.
+ *
+ * Inline editing of individual shot items is deferred to a future polish
+ * pass — for now Rick edits via the JSON-shaped fields if needed (rare).
+ */
+const ShotListBlock: FC<{ scene: Scene }> = ({ scene }) => {
+  const hasShotData =
+    scene.primaryShot !== null ||
+    scene.brollItems.length > 0 ||
+    scene.shotListItems.length > 0 ||
+    scene.onScreenTextOverlays.length > 0 ||
+    scene.cutPoints.length > 0;
+
+  if (!hasShotData) return null;
+
+  return (
+    <details class="shot-list-block" open>
+      <summary
+        style="cursor:pointer;font-weight:600;font-size:13px;color:var(--ink-2);margin-top:12px;padding-top:8px;border-top:1px dashed var(--border-soft);"
+      >
+        Shot list
+        {scene.beatTag ? <span class="muted"> · beat: {scene.beatTag}</span> : null}
+      </summary>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+        {scene.primaryShot ? (
+          <div>
+            <div class="field-label">Primary shot</div>
+            <div style="font-size:13px;color:var(--ink-2);">
+              <span class="tag" style="margin-right:6px;">{scene.primaryShot.type}</span>
+              {scene.primaryShot.description}
+            </div>
+          </div>
+        ) : null}
+
+        {scene.brollItems.length > 0 ? (
+          <div>
+            <div class="field-label">B-roll · {scene.brollItems.length}</div>
+            <ul style="margin:4px 0 0;padding-left:20px;font-size:13px;color:var(--ink-2);">
+              {scene.brollItems.map((b, i) => (
+                <li key={i}>
+                  <span class="tag" style="margin-right:6px;">{b.type}</span>
+                  {b.description}
+                  <span class="muted" style="font-size:12px;"> · {b.durationSeconds}s · {b.source}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {scene.shotListItems.length > 0 ? (
+          <div>
+            <div class="field-label">Shot list items · {scene.shotListItems.length}</div>
+            <ul style="margin:4px 0 0;padding-left:20px;font-size:13px;color:var(--ink-2);">
+              {scene.shotListItems.map((s, i) => (
+                <li key={i}>
+                  <span class="tag" style="margin-right:6px;">{s.type}</span>
+                  {s.description}
+                  <span class="muted" style="font-size:12px;"> · {s.durationSeconds}s</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {scene.onScreenTextOverlays.length > 0 ? (
+          <div>
+            <div class="field-label">On-screen text · {scene.onScreenTextOverlays.length}</div>
+            <ul style="margin:4px 0 0;padding-left:20px;font-size:13px;color:var(--ink-2);">
+              {scene.onScreenTextOverlays.map((o, i) => (
+                <li key={i}>
+                  <strong>{o.textContent}</strong>
+                  <span class="muted" style="font-size:12px;"> · {o.styleHint} · {o.timingHint}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {scene.cutPoints.length > 0 ? (
+          <div>
+            <div class="field-label">Cut points · {scene.cutPoints.length}</div>
+            <ul style="margin:4px 0 0;padding-left:20px;font-size:13px;color:var(--ink-2);">
+              {scene.cutPoints.map((cp, i) => (
+                <li key={i}>
+                  Line {cp.scriptLineNumber}: {cp.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </details>
   );
 };
 

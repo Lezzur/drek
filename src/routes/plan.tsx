@@ -8,6 +8,7 @@ import { matchProjects } from '../engine/match-projects.js';
 import { generatePlanContent } from '../engine/write-scripts.js';
 import { generateHookVariants } from '../engine/generate-hook-variants.js';
 import { selectHook } from '../engine/select-hook.js';
+import { generateShotList } from '../engine/generate-shot-list.js';
 import { runPipeline } from '../engine/pipeline.js';
 import { PlanningEngineError } from '../engine/errors.js';
 import { changePlanFormatProfile } from '../engine/change-format.js';
@@ -292,5 +293,31 @@ function errorToFlash(
     message: `${stepLabel} failed: ${(err as Error).message}`,
   };
 }
+
+/**
+ * POST /plans/:id/generate-shot-list
+ *
+ * Calls generateShotList. Batched LLM call across all scenes. On success
+ * redirects (HX-Redirect) to the plan detail page so the freshly-populated
+ * shot list renders in the scene cards.
+ */
+app.post('/plans/:id/generate-shot-list', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await generateShotList(id);
+    c.header('HX-Redirect', `/plans/${id}`);
+    return c.text('', 200);
+  } catch (err) {
+    if (err instanceof PlanningEngineError) {
+      const status =
+        err.code === 'PLAN_NOT_FOUND' ? 404
+        : err.code === 'WRONG_PLAN_TYPE' || err.code === 'DISALLOWED_TRANSITION' || err.code === 'NO_FORMAT_PROFILE' || err.code === 'NO_LONG_FORM_DELIVERABLE' ? 400
+        : 500;
+      return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
+    }
+    logger.error({ planId: id, err: (err as Error).message }, 'generate-shot-list: unexpected error');
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+  }
+});
 
 export default app;

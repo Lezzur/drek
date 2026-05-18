@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const mockGenerateHookVariants = vi.fn();
 const mockSelectHook = vi.fn();
+const mockGenerateShotList = vi.fn();
 
 vi.mock('../../src/engine/generate-hook-variants.js', () => ({
   generateHookVariants: (...args: unknown[]) => mockGenerateHookVariants(...args),
@@ -16,6 +17,10 @@ vi.mock('../../src/engine/generate-hook-variants.js', () => ({
 
 vi.mock('../../src/engine/select-hook.js', () => ({
   selectHook: (...args: unknown[]) => mockSelectHook(...args),
+}));
+
+vi.mock('../../src/engine/generate-shot-list.js', () => ({
+  generateShotList: (...args: unknown[]) => mockGenerateShotList(...args),
 }));
 
 // ---- Mock other dependencies so server instantiates cleanly ---------------
@@ -135,6 +140,7 @@ beforeEach(() => {
   mockListScenes.mockResolvedValue([]);
   mockGenerateHookVariants.mockReset();
   mockSelectHook.mockReset();
+  mockGenerateShotList.mockReset();
 });
 
 // ---------------------------------------------------------------------------
@@ -250,5 +256,54 @@ describe('POST /plans/:id/select-hook', () => {
     });
 
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /plans/:id/generate-shot-list — happy path + errors
+// ---------------------------------------------------------------------------
+
+describe('POST /plans/:id/generate-shot-list', () => {
+  it('calls generateShotList and redirects to /plans/:id on success', async () => {
+    mockGenerateShotList.mockResolvedValue({ scenes: [], retried: false, durationMs: 10 });
+
+    const app = createApp();
+    const res = await app.request('/plans/plan_abc/generate-shot-list', {
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('HX-Redirect')).toBe('/plans/plan_abc');
+    expect(mockGenerateShotList).toHaveBeenCalledWith('plan_abc');
+  });
+
+  it('returns 404 JSON when PLAN_NOT_FOUND', async () => {
+    mockGenerateShotList.mockRejectedValue(
+      new PlanningEngineError('generate-shot-list', 'PLAN_NOT_FOUND', 'not found'),
+    );
+
+    const app = createApp();
+    const res = await app.request('/plans/plan_xyz/generate-shot-list', {
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(404);
+    const body = await res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('PLAN_NOT_FOUND');
+  });
+
+  it('returns 400 JSON when DISALLOWED_TRANSITION', async () => {
+    mockGenerateShotList.mockRejectedValue(
+      new PlanningEngineError('generate-shot-list', 'DISALLOWED_TRANSITION', 'wrong status'),
+    );
+
+    const app = createApp();
+    const res = await app.request('/plans/plan_abc/generate-shot-list', {
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('DISALLOWED_TRANSITION');
   });
 });

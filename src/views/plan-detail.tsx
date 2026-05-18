@@ -77,6 +77,19 @@ const HOOKS_GENERATED_OR_LATER: PlanStatus[] = [
   'metadata_generated',
 ];
 
+// Statuses at or after shot_list_generated (to show regenerate-shot-list affordance)
+const SHOT_LIST_GENERATED_OR_LATER: PlanStatus[] = [
+  'shot_list_generated',
+  'titles_generated',
+  'title_selected',
+  'thumbnails_generated',
+  'thumbnail_selected',
+  'shorts_extracted',
+  'finalized',
+  'exported',
+  'metadata_generated',
+];
+
 const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
   const canRunPipeline = plan.status !== 'dismissed';
   const canFinalize = plan.status === 'scenes_generated';
@@ -86,6 +99,11 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
     plan.type === 'youtube_advanced' && plan.status === 'scenes_generated';
   const showHookWorkshopLink =
     plan.type === 'youtube_advanced' && HOOKS_GENERATED_OR_LATER.includes(plan.status);
+  const showGenerateShotList =
+    plan.type === 'youtube_advanced' && plan.status === 'hook_selected';
+  const showRegenerateShotList =
+    plan.type === 'youtube_advanced' &&
+    SHOT_LIST_GENERATED_OR_LATER.includes(plan.status);
 
   return (
     <div class="card" style="margin-bottom:16px;">
@@ -123,6 +141,33 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
           >
             Hook workshop →
           </a>
+        ) : null}
+        {showGenerateShotList ? (
+          <button
+            class="btn accent"
+            type="button"
+            hx-post={`/plans/${plan.id}/generate-shot-list`}
+            hx-target="body"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            hx-indicator="#shot-list-indicator"
+          >
+            Generate shot list
+          </button>
+        ) : null}
+        {showRegenerateShotList ? (
+          <button
+            class="btn secondary"
+            type="button"
+            hx-post={`/plans/${plan.id}/generate-shot-list`}
+            hx-target="body"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            hx-confirm="Regenerate the shot list? Existing per-scene shot data will be replaced."
+            hx-indicator="#shot-list-indicator"
+          >
+            Regenerate shot list
+          </button>
         ) : null}
         <span class="spacer" />
         <button

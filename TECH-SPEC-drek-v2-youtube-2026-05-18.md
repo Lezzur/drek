@@ -210,6 +210,7 @@ export function getFormatProfile(id: string): FormatProfile;  // throws on unkno
 
 - **Profiles shipped at v2 launch:** `claude_code_build_along` (default, full implementation), `tutorial`, `case_study`, `comparison`, `essay_opinion`, `listicle`, `reaction_review`. The first ships at depth; the other six ship with minimum-viable structure and can be tuned after first use.
 - **Why constants, not Firestore:** Format profile rules are prompt engineering. Changes need code review + tests. Rick should never edit them via UI.
+- **Mid-plan format change:** When Rick changes the `formatProfileId` on a plan that already has scenes generated, the change-format flow wipes everything derived from the old format and reverts the plan to `projects_matched` so generation can restart cleanly. See §4.9 for the full wipe scope and the route contract.
 
 #### Component H: Intake Module (NEW)
 
@@ -733,6 +734,58 @@ ctaStyle:
   placement: "final 5 seconds, hard CTA"
 ```
 
+### 4.9 Mid-Plan Format Change (wipe-and-revert)
+
+When Rick changes a plan's `formatProfileId` after scenes have been generated, **everything format-dependent is wiped** and the plan reverts to `projects_matched`. There is no "keep scripts + regenerate" option — that path was rejected during PRD review as not worth the complexity for what Rick described as a rare edge case. Wipe-only keeps the implementation a single transactional path.
+
+**Route:**
+
+```
+POST /plans/:id/change-format
+Body: { formatProfileId: string }
+```
+
+**Pre-conditions:**
+- Plan must be `type === 'youtube_advanced'`
+- Plan must be at status `scenes_generated` or later (no reason to wipe if scenes don't exist yet — `projects_matched` and earlier just update `formatProfileId` and stay put)
+- Plan must NOT be `exported` or `published` — refuse the change if the deliverable has already been published; Rick has to dismiss + create a new plan in that case
+
+**What gets wiped (single Firestore batch):**
+
+- All documents in `plans/{planId}/scenes` subcollection
+- All documents in `plans/{planId}/hook_drafts` subcollection
+- The `long_form` Deliverable's `title_concepts`, `thumbnail_concepts`, and `publish_metadata/current` subcollection documents
+- The `long_form` Deliverable's `selectedTitleVariantId`, `selectedThumbnailConceptId`, and `publishMetadataId` reset to `null`
+- The `long_form` Deliverable's `status` reset to `draft`
+- All `short_clip` Deliverables (and their subcollections) — they were derived from the wiped scenes
+- Plan's `selectedHookVariantId`, `selectedTitleVariantId`, `selectedThumbnailConceptId` reset to `null`
+- Plan's `estimatedRuntimeSeconds` reset to `0`
+- Plan's `formatProfileId` updated to the new value
+- Plan's `status` reset to `projects_matched`
+
+**What is preserved:**
+
+- The plan itself + `requirements` + `matchedProjects` (audience and project selection are format-independent)
+- `pipelineBriefId`, `workspacePath`, `userConstraints`, `targetRuntimeSeconds`
+- The `long_form` Deliverable record itself (not deleted) + its `audienceProfileId`
+- All `recording_sessions` for the plan — Rick may have already filmed footage that's still usable under a different format (e.g., changing from `case_study` to `essay_opinion` doesn't make the raw build footage useless)
+
+**UI:**
+
+- Format profile dropdown on the plan detail page is always editable.
+- Selecting a different value when scenes exist shows a `hx-confirm` dialog: "Changing format wipes all scenes, scripts, hooks, titles, thumbnails, and Shorts for this plan. Recording sessions are preserved. Continue?"
+- On confirm, the route fires. On success, the page reloads showing the plan at `projects_matched` with the new format profile selected.
+
+**Failure mode:** The wipe is a single Firestore batch — partial failure leaves the plan exactly as it was. No half-wiped state. If the batch exceeds Firestore's 500-write limit (unlikely — typical plan has <30 docs across all affected collections), the engine falls back to chunked deletes with the same atomicity guarantee via a transaction wrapper.
+
+**Tests:**
+
+- Happy path: wipe and verify all listed fields reset; preserved fields untouched.
+- Reject when plan is `exported` or `published`.
+- Reject when plan type isn't `youtube_advanced`.
+- No-op when scenes don't exist yet (status `projects_matched` or earlier) — `formatProfileId` updates, nothing else changes.
+- Recording sessions survive the wipe.
+
 ## 5. Alternatives Considered
 
 ### Option A: New repo (rejected)
@@ -929,7 +982,7 @@ Numbered continuing from v1's M0-M13. Each milestone is independently deployable
 | **M14** (Track B) | DREK Neurocore client extension (`audience-profiles.ts`), in-memory cache, error types, format profile registry skeleton with `claude_code_build_along` only, contract tests | DREK consumer plumbing complete | M14 Track A scaffolded | ~6 hours |
 | **M15** | Deliverable entity (Firestore schema + CRUD), Plan refactor (`youtube_advanced` type, extended status enum, extended transition table), migration script (`youtube → youtube_lite`), regression tests | DB layer ready for v2 capability | M14 | ~6 hours |
 | **M16** | Intake module: PipelineBrief entity + CRUD, `/intake` views, scoring LLM call (Call 11), promote-to-plan flow, queue depth indicator | Rick can paste briefs, score, promote | M14, M15 | ~8 hours |
-| **M17** | Brief & Episode Planner (extends v1's detect-requirements engine for `youtube_advanced`), Episode Outline with format-profile beats (extends v1's generate-scenes) | Rick can generate a plan with format-tagged scenes | M14, M15 | ~6 hours |
+| **M17** | Brief & Episode Planner (extends v1's detect-requirements engine for `youtube_advanced`), Episode Outline with format-profile beats (extends v1's generate-scenes), Mid-plan format change wipe-and-revert flow (§4.9) | Rick can generate a plan with format-tagged scenes and switch format mid-plan with a confirmation dialog | M14, M15 | ~8 hours |
 | **M18** | Hook Engineering (Call 5 engine step, `/plans/:id/workshop/hooks` selection UI), Script Writing extension (write-scripts honors format + audience + selected hook) | Rick picks a hook and generates scripts | M17 | ~6 hours |
 | **M19** | Shot list generation (Call 6 engine step), Scene card UI extension for shot list rendering + HTMX inline edit | Every scene has rendered shot list; editable | M17 | ~6 hours |
 | **M20** | Title & Thumbnail Workshop (Calls 7 + 8 engine steps, workshop UIs, selection persistence) | Rick picks title and thumbnail concept | M15 | ~8 hours |
@@ -938,7 +991,7 @@ Numbered continuing from v1's M0-M13. Each milestone is independently deployable
 | **M23** | Shorts Extractor (Call 9 engine step, candidate review UI, Deliverable creation on approve), per-Short title/thumbnail/metadata flow | 3-5 Shorts candidates per plan; approval creates Deliverables; per-Short publishing | M22 | ~8 hours |
 | **M24** | End-to-end integration tests (full happy path: brief → finalize → publish for long-form + 2 Shorts), `script.published` signal emission, README + CHANGELOG update, v2 release tag | v2 production-ready | All above | ~6 hours |
 
-**Total estimated v2 build effort:** ~77 hours (~10 working days at full focus). Real-world calendar with subagent parallelization: ~12 weeks (M14 → M24, one milestone per week with buffer).
+**Total estimated v2 build effort:** ~79 hours (~10 working days at full focus). Real-world calendar with subagent parallelization: ~12 weeks (M14 → M24, one milestone per week with buffer).
 
 **Critical path:** M14 (both tracks) → M15 → M17 → M18 → M19 → M22 → M23 → M24. M16 (intake) is parallelizable after M15. M20 is parallelizable after M15. M21 is parallelizable after M15.
 

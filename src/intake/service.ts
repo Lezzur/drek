@@ -276,6 +276,24 @@ export async function promoteBriefToPlan(
     'intake.promote: brief promoted to plan',
   );
 
+  // Create the on-disk workspace folder. Failure is non-fatal — plan +
+  // deliverable are already persisted; Rick can retry from the plan
+  // detail UI if WORKSPACE_ROOT was offline.
+  try {
+    const { createPlanWorkspaceForPlan } = await import('../workspace/service.js');
+    const { getPlan } = await import('../db/plans.js');
+    const freshPlan = await getPlan(planId, db);
+    if (freshPlan) {
+      await createPlanWorkspaceForPlan(freshPlan);
+    }
+  } catch (err) {
+    // Don't fail the promote — the workspace module already logs the error.
+    logger.warn(
+      { briefId, planId, err: (err as Error).message },
+      'intake.promote: workspace creation deferred (will retry on plan detail)',
+    );
+  }
+
   return { planId, deliverableId };
 }
 

@@ -66,6 +66,14 @@ const envSchema = z.object({
   // How often DREK asks Neurocore for new PI listings. Default 30 minutes
   // matches PRD §4.1. Manual "Check now" from the dashboard bypasses this.
   POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
+
+  // --- v2 Workspace module (M21) --------------------------------------------
+  // Absolute path to the directory where per-plan folders are created. Each
+  // youtube_advanced plan gets `${WORKSPACE_ROOT}/${planId}-${slug}/` on
+  // creation. Optional in env so tests + non-Windows hosts can run without
+  // configuring it — the workspace module surfaces a degraded health check
+  // when unset rather than crashing on startup.
+  WORKSPACE_ROOT: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -13,6 +13,7 @@ import listings from './routes/listings.js';
 import settings from './routes/settings.js';
 import intake from './routes/intake.js';
 import deliverables from './routes/deliverables.js';
+import footage from './routes/footage.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -53,6 +54,7 @@ export function createApp(): Hono {
   // wins against the /plans/:id wildcard.
   app.route('/', workshop);
   app.route('/', deliverables);
+  app.route('/', footage);
   app.route('/', plan);
   app.route('/', listings);
   app.route('/', settings);

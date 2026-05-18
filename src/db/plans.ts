@@ -41,6 +41,14 @@ function docToPlan(id: string, data: Record<string, unknown>): Plan {
     createdAt: tsToDate(data.createdAt) ?? new Date(0),
     updatedAt: tsToDate(data.updatedAt) ?? new Date(0),
     exportedAt: tsToDate(data.exportedAt),
+    // v2 additive — v1 documents will have these as undefined; the schema
+    // defaults them to null, but we pass through explicitly when present.
+    formatProfileId: (data.formatProfileId as string | null) ?? null,
+    pipelineBriefId: (data.pipelineBriefId as string | null) ?? null,
+    workspacePath: (data.workspacePath as string | null) ?? null,
+    selectedHookVariantId: (data.selectedHookVariantId as string | null) ?? null,
+    selectedTitleVariantId: (data.selectedTitleVariantId as string | null) ?? null,
+    selectedThumbnailConceptId: (data.selectedThumbnailConceptId as string | null) ?? null,
   });
 }
 
@@ -62,6 +70,13 @@ export async function createPlan(input: PlanCreate, db: Firestore = getDb()): Pr
     createdAt: now,
     updatedAt: now,
     exportedAt: null,
+    // v2 additive
+    formatProfileId: input.formatProfileId ?? null,
+    pipelineBriefId: input.pipelineBriefId ?? null,
+    workspacePath: null,
+    selectedHookVariantId: null,
+    selectedTitleVariantId: null,
+    selectedThumbnailConceptId: null,
   };
   await db.collection(COLLECTION).doc(id).set(doc);
   return docToPlan(id, doc);

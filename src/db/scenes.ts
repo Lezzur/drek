@@ -25,12 +25,20 @@ function docToScene(planId: string, id: string, data: Record<string, unknown>): 
     description: data.description ?? '',
     framingNotes: data.framingNotes ?? '',
     script: data.script ?? '',
+    scriptDraft: (data.scriptDraft as string | undefined) ?? '',
     emphasisCues: data.emphasisCues ?? [],
     pacingNotes: data.pacingNotes ?? '',
     transitionNote: data.transitionNote ?? '',
     estimatedDurationSeconds: data.estimatedDurationSeconds ?? 0,
     projectRef: (data.projectRef as string | null) ?? null,
     storyboardImageUrl: (data.storyboardImageUrl as string | null) ?? null,
+    // v2 additive — defaults to null/[] via schema for v1 documents
+    beatTag: (data.beatTag as string | null) ?? null,
+    primaryShot: (data.primaryShot as Record<string, unknown> | null) ?? null,
+    brollItems: data.brollItems ?? [],
+    shotListItems: data.shotListItems ?? [],
+    onScreenTextOverlays: data.onScreenTextOverlays ?? [],
+    cutPoints: data.cutPoints ?? [],
   });
 }
 
@@ -57,12 +65,20 @@ export async function createScene(
     description: input.description ?? '',
     framingNotes: input.framingNotes ?? '',
     script: input.script ?? '',
+    scriptDraft: input.scriptDraft ?? '',
     emphasisCues: input.emphasisCues ?? [],
     pacingNotes: input.pacingNotes ?? '',
     transitionNote: input.transitionNote ?? '',
     estimatedDurationSeconds: input.estimatedDurationSeconds ?? 0,
     projectRef: input.projectRef ?? null,
     storyboardImageUrl: input.storyboardImageUrl ?? null,
+    // v2 additive
+    beatTag: input.beatTag ?? null,
+    primaryShot: input.primaryShot ?? null,
+    brollItems: input.brollItems ?? [],
+    shotListItems: input.shotListItems ?? [],
+    onScreenTextOverlays: input.onScreenTextOverlays ?? [],
+    cutPoints: input.cutPoints ?? [],
   };
   await scenesCollection(db, planId).doc(id).set(doc);
   return docToScene(planId, id, doc);

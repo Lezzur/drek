@@ -36,6 +36,7 @@ interface Query {
   limit(n: number): Query;
   startAfter(snap: DocSnap): Query;
   get(): Promise<QuerySnap>;
+  count(): CountQuery;
 }
 
 interface CountQuery {
@@ -81,6 +82,23 @@ function makeQuery(store: FakeStore, basePath: string, filters: {
     },
     startAfter(snap) {
       return makeQuery(store, basePath, { ...filters, startAfterId: snap.id });
+    },
+    count(): CountQuery {
+      return {
+        async get() {
+          const prefix = `${basePath}/`;
+          let count = 0;
+          for (const [key, data] of store.data.entries()) {
+            if (!key.startsWith(prefix)) continue;
+            const rest = key.slice(prefix.length);
+            if (rest.includes('/')) continue;
+            if (filters.wheres.every((w) => fieldEquals(data, w.field, w.value))) {
+              count++;
+            }
+          }
+          return { data: () => ({ count }) };
+        },
+      };
     },
     async get(): Promise<QuerySnap> {
       const prefix = `${basePath}/`;

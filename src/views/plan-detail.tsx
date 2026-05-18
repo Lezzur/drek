@@ -259,6 +259,11 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
             Publishing →
           </a>
         ) : null}
+        {showPublishLink ? (
+          <a class="btn secondary" href={`/plans/${plan.id}/shorts`}>
+            Shorts workshop →
+          </a>
+        ) : null}
         {plan.type === 'youtube_advanced' ? (
           <a class="btn secondary" href={`/plans/${plan.id}/footage`}>
             Footage →

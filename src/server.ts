@@ -15,6 +15,7 @@ import intake from './routes/intake.js';
 import deliverables from './routes/deliverables.js';
 import footage from './routes/footage.js';
 import publish from './routes/publish.js';
+import shorts from './routes/shorts.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -56,6 +57,7 @@ export function createApp(): Hono {
   app.route('/', workshop);
   app.route('/', deliverables);
   app.route('/', publish);
+  app.route('/', shorts);
   app.route('/', footage);
   app.route('/', plan);
   app.route('/', listings);

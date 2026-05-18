@@ -148,3 +148,163 @@ describe('HookWorkshopView — header', () => {
     expect(html).toContain('Back to plan');
   });
 });
+
+import { TitleWorkshopView, ThumbnailWorkshopView } from '../../src/views/workshop.js';
+import type { Deliverable, TitleConcept, ThumbnailConcept } from '../../src/db/schemas.js';
+
+function fakeDeliverable(overrides: Partial<Deliverable> = {}): Deliverable {
+  return {
+    id: 'del_1',
+    planId: 'plan_1',
+    kind: 'long_form',
+    audienceProfileId: 'developer_longform',
+    title: 'My Episode',
+    status: 'draft',
+    scriptOverrideSceneIds: null,
+    customScripts: null,
+    selectedTitleVariantId: null,
+    selectedThumbnailConceptId: null,
+    publishMetadataId: null,
+    youtubeUrl: null,
+    publishedAt: null,
+    createdAt: new Date('2026-05-18T10:00:00Z'),
+    updatedAt: new Date('2026-05-18T10:00:00Z'),
+    ...overrides,
+  };
+}
+
+function fakeTitleConcept(overrides: Partial<TitleConcept> = {}): TitleConcept {
+  return {
+    id: 'title_a',
+    titleText: 'How I built a $50k automation in 2 hours',
+    archetype: 'specificity',
+    predictedClickability: 8,
+    reasoning: 'Specific dollar figure grabs attention',
+    keywordsSurfaced: ['claude', 'automation'],
+    selected: false,
+    createdAt: new Date('2026-05-18T10:01:00Z'),
+    ...overrides,
+  };
+}
+
+function fakeThumbnailConcept(overrides: Partial<ThumbnailConcept> = {}): ThumbnailConcept {
+  return {
+    id: 'thumb_a',
+    composition: 'split: terminal left, headshot right',
+    textHook: 'SAVED IT',
+    expression: 'relieved smile',
+    colorPalette: ['#0a0a0a', '#22c55e'],
+    assetsRequired: ['screenshot of failed test'],
+    conceptSummary: 'demo-saved moment with green accent',
+    selected: false,
+    createdAt: new Date('2026-05-18T10:02:00Z'),
+    ...overrides,
+  };
+}
+
+describe('TitleWorkshopView', () => {
+  it('renders empty state when no concepts', () => {
+    const html = toHtml(
+      TitleWorkshopView({
+        plan: fakePlan(),
+        deliverable: fakeDeliverable(),
+        concepts: [],
+      }),
+    );
+    expect(html).toContain('Generate titles first');
+  });
+
+  it('renders concept cards sorted by clickability desc', () => {
+    const html = toHtml(
+      TitleWorkshopView({
+        plan: fakePlan(),
+        deliverable: fakeDeliverable(),
+        concepts: [
+          fakeTitleConcept({ id: 'a', predictedClickability: 5, titleText: 'Low CTR' }),
+          fakeTitleConcept({ id: 'b', predictedClickability: 9, titleText: 'High CTR' }),
+        ],
+      }),
+    );
+    expect(html).toContain('High CTR');
+    expect(html).toContain('Low CTR');
+    // The high-CTR card should appear first in the HTML
+    expect(html.indexOf('High CTR')).toBeLessThan(html.indexOf('Low CTR'));
+  });
+
+  it('selected concept has the selected marker', () => {
+    const html = toHtml(
+      TitleWorkshopView({
+        plan: fakePlan(),
+        deliverable: fakeDeliverable(),
+        concepts: [fakeTitleConcept({ selected: true })],
+      }),
+    );
+    expect(html).toContain('selected');
+    expect(html).toContain('✓ selected');
+  });
+
+  it('regenerate button is wired to deliverable endpoint', () => {
+    const html = toHtml(
+      TitleWorkshopView({
+        plan: fakePlan(),
+        deliverable: fakeDeliverable({ id: 'del_xyz' }),
+        concepts: [fakeTitleConcept()],
+      }),
+    );
+    expect(html).toContain('hx-post="/deliverables/del_xyz/generate-titles"');
+    expect(html).toContain('hx-confirm');
+  });
+});
+
+describe('ThumbnailWorkshopView', () => {
+  it('renders empty state when no concepts', () => {
+    const html = toHtml(
+      ThumbnailWorkshopView({
+        plan: fakePlan(),
+        deliverable: fakeDeliverable(),
+        concepts: [],
+        selectedTitleText: 'Some title',
+      }),
+    );
+    expect(html).toContain('Generate thumbnail concepts first');
+  });
+
+  it('warns when no title is selected', () => {
+    const html = toHtml(
+      ThumbnailWorkshopView({
+        plan: fakePlan(),
+        deliverable: fakeDeliverable(),
+        concepts: [],
+        selectedTitleText: null,
+      }),
+    );
+    expect(html).toContain('No title selected');
+  });
+
+  it('shows the selected title context above the cards', () => {
+    const html = toHtml(
+      ThumbnailWorkshopView({
+        plan: fakePlan(),
+        deliverable: fakeDeliverable(),
+        concepts: [fakeThumbnailConcept()],
+        selectedTitleText: 'My chosen title',
+      }),
+    );
+    expect(html).toContain('My chosen title');
+  });
+
+  it('renders concept cards with palette swatches + text hook', () => {
+    const html = toHtml(
+      ThumbnailWorkshopView({
+        plan: fakePlan(),
+        deliverable: fakeDeliverable(),
+        concepts: [fakeThumbnailConcept()],
+        selectedTitleText: 'x',
+      }),
+    );
+    expect(html).toContain('SAVED IT');
+    expect(html).toContain('#0a0a0a');
+    expect(html).toContain('#22c55e');
+    expect(html).toContain('split: terminal left, headshot right');
+  });
+});

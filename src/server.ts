@@ -12,6 +12,7 @@ import exportRoutes from './routes/export.js';
 import listings from './routes/listings.js';
 import settings from './routes/settings.js';
 import intake from './routes/intake.js';
+import deliverables from './routes/deliverables.js';
 
 /**
  * Build the Hono app. Kept as a factory so tests can construct fresh instances
@@ -51,6 +52,7 @@ export function createApp(): Hono {
   // Workshop routes must come BEFORE plan so /plans/:id/workshop/hooks
   // wins against the /plans/:id wildcard.
   app.route('/', workshop);
+  app.route('/', deliverables);
   app.route('/', plan);
   app.route('/', listings);
   app.route('/', settings);

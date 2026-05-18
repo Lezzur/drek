@@ -9,6 +9,9 @@ import { generatePlanContent } from '../engine/write-scripts.js';
 import { generateHookVariants } from '../engine/generate-hook-variants.js';
 import { selectHook } from '../engine/select-hook.js';
 import { generateShotList } from '../engine/generate-shot-list.js';
+import { generateTitleVariants } from '../engine/generate-title-variants.js';
+import { generateThumbnailConcepts } from '../engine/generate-thumbnail-concepts.js';
+import { findLongFormDeliverable } from '../db/deliverables.js';
 import { runPipeline } from '../engine/pipeline.js';
 import { PlanningEngineError } from '../engine/errors.js';
 import { changePlanFormatProfile } from '../engine/change-format.js';
@@ -316,6 +319,55 @@ app.post('/plans/:id/generate-shot-list', async (c) => {
       return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
     }
     logger.error({ planId: id, err: (err as Error).message }, 'generate-shot-list: unexpected error');
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+  }
+});
+
+/**
+ * POST /plans/:id/generate-titles — fires Call 7 for the long-form
+ * deliverable of this plan. Resolves the deliverable via
+ * findLongFormDeliverable then delegates to generateTitleVariants.
+ */
+app.post('/plans/:id/generate-titles', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const longForm = await findLongFormDeliverable(id);
+    await generateTitleVariants(longForm.id);
+    c.header('HX-Redirect', `/plans/${id}/workshop/titles`);
+    return c.text('', 200);
+  } catch (err) {
+    if (err instanceof PlanningEngineError) {
+      const status =
+        err.code === 'PLAN_NOT_FOUND' ? 404
+        : err.code === 'WRONG_PLAN_TYPE' || err.code === 'DISALLOWED_TRANSITION' || err.code === 'NO_FORMAT_PROFILE' || err.code === 'NO_REQUIREMENTS' ? 400
+        : 500;
+      return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
+    }
+    logger.error({ planId: id, err: (err as Error).message }, 'generate-titles: unexpected error');
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+  }
+});
+
+/**
+ * POST /plans/:id/generate-thumbnails — fires Call 8 for the long-form
+ * deliverable. Requires a selected title first (engine throws NO_REQUIREMENTS).
+ */
+app.post('/plans/:id/generate-thumbnails', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const longForm = await findLongFormDeliverable(id);
+    await generateThumbnailConcepts(longForm.id);
+    c.header('HX-Redirect', `/plans/${id}/workshop/thumbnails`);
+    return c.text('', 200);
+  } catch (err) {
+    if (err instanceof PlanningEngineError) {
+      const status =
+        err.code === 'PLAN_NOT_FOUND' ? 404
+        : err.code === 'WRONG_PLAN_TYPE' || err.code === 'DISALLOWED_TRANSITION' || err.code === 'NO_FORMAT_PROFILE' || err.code === 'NO_REQUIREMENTS' ? 400
+        : 500;
+      return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
+    }
+    logger.error({ planId: id, err: (err as Error).message }, 'generate-thumbnails: unexpected error');
     return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
   }
 });

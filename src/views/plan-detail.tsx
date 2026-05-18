@@ -90,6 +90,26 @@ const SHOT_LIST_GENERATED_OR_LATER: PlanStatus[] = [
   'metadata_generated',
 ];
 
+const TITLES_GENERATED_OR_LATER: PlanStatus[] = [
+  'titles_generated',
+  'title_selected',
+  'thumbnails_generated',
+  'thumbnail_selected',
+  'shorts_extracted',
+  'finalized',
+  'exported',
+  'metadata_generated',
+];
+
+const THUMBNAILS_GENERATED_OR_LATER: PlanStatus[] = [
+  'thumbnails_generated',
+  'thumbnail_selected',
+  'shorts_extracted',
+  'finalized',
+  'exported',
+  'metadata_generated',
+];
+
 const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
   const canRunPipeline = plan.status !== 'dismissed';
   const canFinalize = plan.status === 'scenes_generated';
@@ -104,6 +124,16 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
   const showRegenerateShotList =
     plan.type === 'youtube_advanced' &&
     SHOT_LIST_GENERATED_OR_LATER.includes(plan.status);
+  const showGenerateTitles =
+    plan.type === 'youtube_advanced' && plan.status === 'shot_list_generated';
+  const showTitleWorkshopLink =
+    plan.type === 'youtube_advanced' &&
+    TITLES_GENERATED_OR_LATER.includes(plan.status);
+  const showGenerateThumbnails =
+    plan.type === 'youtube_advanced' && plan.status === 'title_selected';
+  const showThumbnailWorkshopLink =
+    plan.type === 'youtube_advanced' &&
+    THUMBNAILS_GENERATED_OR_LATER.includes(plan.status);
 
   return (
     <div class="card" style="margin-bottom:16px;">
@@ -168,6 +198,40 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
           >
             Regenerate shot list
           </button>
+        ) : null}
+        {showGenerateTitles ? (
+          <button
+            class="btn accent"
+            type="button"
+            hx-post={`/plans/${plan.id}/generate-titles`}
+            hx-target="body"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+          >
+            Generate titles
+          </button>
+        ) : null}
+        {showTitleWorkshopLink ? (
+          <a class="btn secondary" href={`/plans/${plan.id}/workshop/titles`}>
+            Title workshop →
+          </a>
+        ) : null}
+        {showGenerateThumbnails ? (
+          <button
+            class="btn accent"
+            type="button"
+            hx-post={`/plans/${plan.id}/generate-thumbnails`}
+            hx-target="body"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+          >
+            Generate thumbnails
+          </button>
+        ) : null}
+        {showThumbnailWorkshopLink ? (
+          <a class="btn secondary" href={`/plans/${plan.id}/workshop/thumbnails`}>
+            Thumbnail workshop →
+          </a>
         ) : null}
         <span class="spacer" />
         <button

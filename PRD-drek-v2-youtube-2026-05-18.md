@@ -164,7 +164,7 @@ DREK v2 is still not for video editors, general content creators, multi-person p
 - "Score this brief" button — calls LLM with the rubric and the brief text, returns suggested scores Rick can accept or override.
 - "Promote to plan" button on `vetted` briefs — creates a `youtube_advanced` plan pre-filled with the brief text, advances the brief to `selected`.
 - Queue depth indicator: if `vetted + candidate` count < 3, dashboard shows a warning ("Pipeline thin — source more briefs").
-- Manual brief paste: dedicated form. URL ingestion via PI listings already exists in v1 — extended in v1.1 to surface non-video-required listings here too.
+- Manual brief paste: dedicated form. PI-ingested listings remain in v1's listings browser; the pipeline view is dedicated to externally-sourced briefs (Upwork, Freelancer, manual paste). The two surfaces are intentionally separate — PI listings carry their own provenance and ack semantics, pipeline briefs do not.
 
 **States:**
 - **Empty queue:** Dashboard shows pipeline warning. New brief form prominent.
@@ -863,15 +863,15 @@ Plus from the 8 gaps in the DREK critique:
 
 ## 13. Dependencies
 
-| Dependency | Type | Status | Blocks |
-|------------|------|--------|--------|
-| Neurocore AudienceProfile entity + endpoints | Neurocore change | Not started | All v2 generation steps |
-| Neurocore `script.published` signal handler | Neurocore change | Not started | v2.1 feedback loop |
-| DREK v1 shipped and stable | Prerequisite | Done (M0-M13 + post-M13 LLM settings + pipeline route) | v2 build |
-| Workspace root configured on Rick's Windows host | Operational | Pending Rick | Module 2, Module 5, exports |
-| YouTube Analytics API access (v2.1) | External | Not started | Gap #7 full closure |
-| External research provider (Exa.ai or similar) | External | Not started | Gap #8, v2.1 |
-| All v1 Neurocore gaps (1-5) | Inherited | Done in Neurocore main | All planning quality |
+| Dependency | Type | Status | Owner | Blocks |
+|------------|------|--------|-------|--------|
+| Neurocore AudienceProfile entity + endpoints | Neurocore change | Not started — M14 Track A | Tony Stark | All v2 generation steps |
+| Neurocore `script.published` signal handler | Neurocore change | Not started — M24 | Tony Stark | v2.1 feedback loop |
+| DREK v1 shipped and stable | Prerequisite | Done (M0-M13 + post-M13 LLM settings + pipeline route) | Tony Stark | v2 build |
+| Workspace root configured on Rick's Windows host | Operational | Pending Rick | Rick | Module 2, Module 5, exports |
+| YouTube Analytics API access (v2.1) | External | Not started | Rick (provisioning) | Gap #7 full closure |
+| External research provider (Exa.ai or similar) | External | Not started | Tony Stark (v2.1) | Gap #8, v2.1 |
+| All v1 Neurocore gaps (1-5) | Inherited | Done in Neurocore main | — | All planning quality |
 
 ---
 
@@ -891,6 +891,8 @@ Plus from the 8 gaps in the DREK critique:
 - Title & Thumbnail Workshop (4.10)
 - Publishing Metadata (4.12)
 - Shorts Extractor (4.13)
+- Recording & Footage Manifest (4.11) — Rick wants footage tracking from day one, not in a spreadsheet
+- LLM-suggested pipeline brief scoring (4.3) — core capability, not a slip-target
 - Deliverable Bundle View (4.14)
 - Plan status enum extension (7.3)
 - Deliverable entity (7.5)
@@ -898,9 +900,7 @@ Plus from the 8 gaps in the DREK critique:
 
 ### P1 — Should Have (high value, not launch blockers)
 
-- Recording & Footage Manifest (4.11) — can ship in v2.0.1 if scope pressure; Rick can track footage in a spreadsheet for the first 1-2 episodes
 - `script.published` signal emission (6.1) — needed before v2.1 analytics work but not strictly needed for v2 to be useful
-- LLM-suggested pipeline brief scoring (4.3) — Rick can score manually if the LLM step slips
 
 ### P2 — Could Have (v2.1+)
 
@@ -916,9 +916,11 @@ Plus from the 8 gaps in the DREK critique:
 
 Numbered continuing from v1's M0-M13. Each milestone is a deployable unit with passing tests.
 
+**Ownership note:** Tony Stark owns both DREK-side and Neurocore-side work for v2, same as v1. M14 has two parallel tracks (Neurocore AudienceProfile CRUD + DREK consumer plumbing) executed via Sonnet subagent parallelization — the 2-week estimate assumes parallel execution. All subsequent milestones are DREK-only.
+
 | Milestone | Scope | Duration | Status gate |
 |-----------|-------|----------|-------------|
-| M14 | AudienceProfile entity + endpoints (Neurocore side); DREK client extension to fetch profiles; format profile registry skeleton with `claude_code_build_along` only | Week 1-2 | Neurocore unit + DREK integration tests pass; profile fetch verified |
+| M14 | **Track A (Neurocore):** AudienceProfile entity, Zod schema, Firestore CRUD, 4 endpoints (list/get/create/patch), composite index, tests. **Track B (DREK):** Neurocore client extension to fetch profiles, in-session caching, format profile registry skeleton with `claude_code_build_along` only. Tracks run in parallel. | Week 1-2 | Neurocore unit tests pass + endpoint smoke; DREK integration test fetches both seed profiles (`developer_longform`, `business_owner_shorts`) and injects them into a trivial generation step |
 | M15 | Deliverable entity + Plan refactor (`youtube_advanced` type, status enum extension); Plan-detail UI shows "Deliverables" section (empty for now) | Week 2-3 | All v1 tests still pass; new schema migration covered |
 | M16 | Pipeline & Sourcing module (PipelineBrief entity, /pipeline view, scoring LLM step, promote-to-plan flow) | Week 3-4 | Rick can paste a brief, get a score, promote it to a plan |
 | M17 | Brief & Episode Planner (Module 3 extension for `youtube_advanced`); Episode Outline with beat tags (Module 4 extension) | Week 4-5 | Rick can generate a plan with format-tagged scenes |

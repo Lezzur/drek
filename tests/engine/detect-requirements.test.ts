@@ -5,8 +5,35 @@ vi.mock('../../src/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn() },
 }));
 
+// Mock the audience profile client so v2 tests don't need a real Neurocore endpoint.
+vi.mock('../../src/neurocore/audience-profiles.js', () => {
+  const fakeProfile = {
+    id: 'developer_longform',
+    name: 'Developer Longform',
+    description: 'Test profile',
+    watchPersona: 'Developers',
+    painPoints: ['pain1'],
+    buyingTriggers: ['trigger1'],
+    voiceGuidelines: { tone: 'warm', vocabulary: 'technical', sentenceLengthGuide: 'medium', taboos: [] },
+    hookPatterns: ['hook1'],
+    pacingRules: { wordsPerMinute: 150, avgSentenceWords: 14, densityNote: 'leave pauses' },
+    ctaStyle: { type: 'subscribe_and_long_form', phrasing: 'Subscribe', placement: 'end' },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  return {
+    getAudienceProfileClient: () => ({
+      get: vi.fn().mockResolvedValue(fakeProfile),
+    }),
+    _resetAudienceProfileClientForTests: vi.fn(),
+    clearAudienceProfileCache: vi.fn(),
+  };
+});
+
 import { createFakeFirestore, type FakeFirestore } from '../db/fake-firestore.js';
 import { createPlan } from '../../src/db/plans.js';
+import { createDeliverable } from '../../src/db/deliverables.js';
+import { createPipelineBrief } from '../../src/db/pipeline-briefs.js';
 import { detectRequirements } from '../../src/engine/detect-requirements.js';
 import { PlanningEngineError } from '../../src/engine/errors.js';
 import { LLMProviderError, type LLMProvider } from '../../src/providers/index.js';
@@ -285,5 +312,195 @@ describe('detectRequirements — LLM provider failure', () => {
         db: asDb(),
       }),
     ).rejects.toMatchObject({ code: 'LLM_FAILED' });
+  });
+});
+
+// ===========================================================================
+// youtube_advanced (v2) tests
+// ===========================================================================
+
+const SAMPLE_BRIEF_TEXT = `Build an AI-powered lead scoring system for a SaaS company.
+The brief: ingest leads from HubSpot, run them through a scoring model, update the CRM.
+Budget: $8k. Timeline: 3 weeks. Stack: Python, Postgres, Zapier.`;
+
+const VALID_EPISODE_PLAN = {
+  episodeAngle: 'Building a real-time lead scoring pipeline in a single Claude Code session',
+  antiAngle: 'This is not a tutorial on machine learning models',
+  technicalScope: 'Shows the HubSpot integration and scoring logic. Defers deployment and monitoring.',
+  intendedTakeaway: 'Viewer understands how to scope and execute a bounded automation build',
+  risksToFlag: ['HubSpot API rate limits may interrupt the live demo'],
+};
+
+/** Helper: create a youtube_advanced plan with brief + deliverable in fake Firestore. */
+async function makeYoutubeAdvancedPlan(opts: { status?: string; noBrief?: boolean; noFormatProfile?: boolean } = {}) {
+  const brief = opts.noBrief
+    ? null
+    : await createPipelineBrief(
+        {
+          title: 'Lead Scoring Brief',
+          rawText: SAMPLE_BRIEF_TEXT,
+          stage: 'vetted',
+        },
+        asDb(),
+      );
+
+  const plan = await createPlan(
+    {
+      type: 'youtube_advanced',
+      title: 'Lead Scoring Episode',
+      targetRuntimeSeconds: 1800,
+      formatProfileId: opts.noFormatProfile ? null : 'claude_code_build_along',
+      pipelineBriefId: brief?.id ?? null,
+      status: (opts.status as 'awaiting_review') ?? 'awaiting_review',
+    },
+    asDb(),
+  );
+
+  // Create the long_form Deliverable (invariant for youtube_advanced plans).
+  const deliverable = await createDeliverable(
+    {
+      planId: plan.id,
+      kind: 'long_form',
+      audienceProfileId: 'developer_longform',
+      title: plan.title,
+      status: 'draft',
+    },
+    asDb(),
+  );
+
+  return { plan, brief, deliverable };
+}
+
+describe('detectRequirements — youtube_advanced happy path', () => {
+  it('parses episode plan JSON, stores encoded requirement, transitions to requirements_reviewed', async () => {
+    const { plan } = await makeYoutubeAdvancedPlan();
+    const provider = makeProvider([JSON.stringify(VALID_EPISODE_PLAN)]);
+
+    const result = await detectRequirements(plan.id, { provider, db: asDb() });
+
+    expect(result.requirements).toHaveLength(1);
+    expect(result.requirements[0]?.skill).toBe('episode_plan');
+    expect(result.requirements[0]?.category).toBe('episode_outline');
+    expect(result.requirements[0]?.priority).toBe('must_show');
+
+    // Evidence should be the JSON-encoded episode plan.
+    const decoded = JSON.parse(result.requirements[0]!.evidence);
+    expect(decoded.episodeAngle).toBe(VALID_EPISODE_PLAN.episodeAngle);
+    expect(decoded.risksToFlag).toHaveLength(1);
+
+    expect(result.plan.status).toBe('requirements_reviewed');
+    expect(result.retried).toBe(false);
+  });
+
+  it('retries once on bad JSON then succeeds', async () => {
+    const { plan } = await makeYoutubeAdvancedPlan();
+    const provider = makeProvider(['not json at all', JSON.stringify(VALID_EPISODE_PLAN)]);
+
+    const result = await detectRequirements(plan.id, { provider, db: asDb() });
+
+    expect(result.retried).toBe(true);
+    expect(result.requirements[0]?.skill).toBe('episode_plan');
+    expect(result.plan.status).toBe('requirements_reviewed');
+  });
+});
+
+describe('detectRequirements — youtube_advanced pre-condition failures', () => {
+  it('throws NO_FORMAT_PROFILE when formatProfileId is null', async () => {
+    const { plan } = await makeYoutubeAdvancedPlan({ noFormatProfile: true });
+    await expect(
+      detectRequirements(plan.id, { provider: makeProvider(['']), db: asDb() }),
+    ).rejects.toMatchObject({ code: 'NO_FORMAT_PROFILE' });
+  });
+
+  it('throws NO_FORMAT_PROFILE when formatProfileId points to unknown profile', async () => {
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'X',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'nonexistent_profile',
+        pipelineBriefId: 'brief_x',
+      },
+      asDb(),
+    );
+    await expect(
+      detectRequirements(plan.id, { provider: makeProvider(['']), db: asDb() }),
+    ).rejects.toMatchObject({ code: 'NO_FORMAT_PROFILE' });
+  });
+
+  it('throws NO_PIPELINE_BRIEF when pipelineBriefId is null', async () => {
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'X',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'claude_code_build_along',
+        pipelineBriefId: null,
+      },
+      asDb(),
+    );
+    await expect(
+      detectRequirements(plan.id, { provider: makeProvider(['']), db: asDb() }),
+    ).rejects.toMatchObject({ code: 'NO_PIPELINE_BRIEF' });
+  });
+
+  it('throws NO_PIPELINE_BRIEF when pipelineBriefId does not resolve', async () => {
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'X',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'claude_code_build_along',
+        pipelineBriefId: 'brief_does_not_exist',
+      },
+      asDb(),
+    );
+    await expect(
+      detectRequirements(plan.id, { provider: makeProvider(['']), db: asDb() }),
+    ).rejects.toMatchObject({ code: 'NO_PIPELINE_BRIEF' });
+  });
+
+  it('throws NO_LONG_FORM_DELIVERABLE when no long_form deliverable exists', async () => {
+    // Create plan with brief but no deliverable.
+    const brief = await createPipelineBrief(
+      { title: 'Brief', rawText: SAMPLE_BRIEF_TEXT, stage: 'vetted' },
+      asDb(),
+    );
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'X',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'claude_code_build_along',
+        pipelineBriefId: brief.id,
+      },
+      asDb(),
+    );
+    // No deliverable created.
+    await expect(
+      detectRequirements(plan.id, { provider: makeProvider(['']), db: asDb() }),
+    ).rejects.toMatchObject({ code: 'NO_LONG_FORM_DELIVERABLE' });
+  });
+
+  it('throws DISALLOWED_TRANSITION when plan is past the editable window', async () => {
+    const { plan } = await makeYoutubeAdvancedPlan({ status: 'scenes_generated' });
+    await expect(
+      detectRequirements(plan.id, {
+        provider: makeProvider([JSON.stringify(VALID_EPISODE_PLAN)]),
+        db: asDb(),
+      }),
+    ).rejects.toMatchObject({ code: 'DISALLOWED_TRANSITION' });
+  });
+
+  it('throws INVALID_OUTPUT when both JSON attempts fail', async () => {
+    const { plan } = await makeYoutubeAdvancedPlan();
+    const provider = makeProvider(['garbage 1', 'garbage 2']);
+    await expect(
+      detectRequirements(plan.id, { provider, db: asDb() }),
+    ).rejects.toMatchObject({ code: 'INVALID_OUTPUT', step: 'detect-requirements' });
+
+    // Status must remain unchanged.
+    const stored = (await fake.collection('plans').doc(plan.id).get()).data() as { status?: string } | undefined;
+    expect(stored?.status).toBe('awaiting_review');
   });
 });

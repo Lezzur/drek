@@ -7,13 +7,19 @@
 
 export type PlanningEngineErrorCode =
   // ---- Input / state errors --------------------------------------------
-  | 'PLAN_NOT_FOUND'           // planId didn't resolve to a doc
-  | 'WRONG_PLAN_TYPE'          // step doesn't apply to this plan.type
-  | 'WRONG_PLAN_STATUS'        // plan.status isn't in an allowed-entry state
-  | 'DISALLOWED_TRANSITION'    // target status not reachable from current
-  | 'NO_LISTING_TEXT'          // requirement detection needs sourceListingText
-  | 'NO_REQUIREMENTS'          // project matching needs a confirmed requirement set
-  | 'NO_PROJECT_MATCHES'       // scene/script generation needs matched projects
+  | 'PLAN_NOT_FOUND'                // planId didn't resolve to a doc
+  | 'WRONG_PLAN_TYPE'               // step doesn't apply to this plan.type
+  | 'WRONG_PLAN_STATUS'             // plan.status isn't in an allowed-entry state
+  | 'DISALLOWED_TRANSITION'         // target status not reachable from current
+  | 'NO_LISTING_TEXT'               // requirement detection needs sourceListingText
+  | 'NO_REQUIREMENTS'               // project matching needs a confirmed requirement set
+  | 'NO_PROJECT_MATCHES'            // scene/script generation needs matched projects
+  // ---- v2 pre-condition errors -----------------------------------------
+  | 'NO_PIPELINE_BRIEF'             // youtube_advanced detect-requirements needs pipelineBriefId
+  | 'NO_FORMAT_PROFILE'             // youtube_advanced steps need a formatProfileId on the plan
+  | 'NO_LONG_FORM_DELIVERABLE'      // youtube_advanced steps need the long_form Deliverable
+  | 'CANNOT_CHANGE_AFTER_PUBLISH'   // change-format rejected: plan already exported/published
+  | 'UNKNOWN_FORMAT_PROFILE'        // change-format rejected: unknown formatProfileId
   // ---- LLM-level failures ---------------------------------------------
   | 'LLM_FAILED'               // underlying CLI subprocess failure (timeout, exit, etc.)
   | 'INVALID_OUTPUT'           // LLM output didn't parse / didn't match schema

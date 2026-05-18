@@ -2,6 +2,7 @@ import type { FC } from 'hono/jsx';
 import { Layout, type LayoutProps } from './layout.js';
 import { SceneList } from './scene-card.js';
 import type { Plan, Scene, PlanStatus } from '../db/schemas.js';
+import { listFormatProfiles } from '../engine/format-profiles/index.js';
 
 export interface PlanDetailProps {
   plan: Plan;
@@ -196,6 +197,71 @@ const ListingContext: FC<{ plan: Plan }> = ({ plan }) => {
   );
 };
 
+/**
+ * Format profile selector — only shown for youtube_advanced plans.
+ * Editable when plan is not exported or published. Fires
+ * hx-post="/plans/:id/change-format" on change.
+ */
+const FormatProfileSelector: FC<{ plan: Plan }> = ({ plan }) => {
+  if (plan.type !== 'youtube_advanced') return null;
+
+  const profiles = listFormatProfiles();
+  const isLocked = plan.status === 'exported' || (plan.status as string) === 'published';
+  const hasScenes = !['awaiting_review', 'dismissed', 'requirements_reviewed', 'projects_matched'].includes(plan.status);
+
+  if (isLocked) {
+    const lockedProfile = profiles.find((p) => p.id === plan.formatProfileId);
+    return (
+      <div class="card" style="margin-bottom:16px;">
+        <h3 class="section-label">Format profile</h3>
+        <div class="row" style="gap:10px; align-items:center;">
+          <select disabled style="flex:1; opacity:0.6; cursor:not-allowed;">
+            <option>{lockedProfile?.displayName ?? plan.formatProfileId ?? 'Unknown'}</option>
+          </select>
+          <span class="muted" style="font-size:12px; white-space:nowrap;" title="Format locked after publish — create a new plan instead">
+            Locked after publish
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const confirmMsg = hasScenes
+    ? 'Changing format wipes all scenes, scripts, hooks, titles, thumbnails, and Shorts for this plan. Recording sessions are preserved. Continue?'
+    : undefined;
+
+  return (
+    <div class="card" style="margin-bottom:16px;">
+      <h3 class="section-label">Format profile</h3>
+      <select
+        name="formatProfileId"
+        hx-post={`/plans/${plan.id}/change-format`}
+        hx-target="body"
+        hx-swap="outerHTML"
+        hx-include="this"
+        hx-vals={`{"formatProfileId": "{{this.value}}"}`}
+        hx-trigger="change"
+        hx-confirm={confirmMsg}
+        style="width:100%;"
+      >
+        {profiles.map((p) => (
+          <option
+            value={p.id}
+            selected={plan.formatProfileId === p.id}
+          >
+            {p.displayName}
+          </option>
+        ))}
+      </select>
+      {hasScenes ? (
+        <div class="muted" style="font-size:12px; margin-top:6px;">
+          Changing format will wipe scenes, scripts, hooks, titles, and Shorts. Recording sessions are preserved.
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const PlanHeader: FC<{ plan: Plan }> = ({ plan }) => {
   return (
     <div style="margin-bottom: 20px;">
@@ -218,6 +284,7 @@ export const PlanDetailPage: FC<PlanDetailProps> = ({ plan, scenes, flash }) => 
     <Layout title={plan.title} flash={flash}>
       <PlanHeader plan={plan} />
       <ActionStrip plan={plan} />
+      <FormatProfileSelector plan={plan} />
       <RuntimeBar targetSeconds={plan.targetRuntimeSeconds} estimatedSeconds={plan.estimatedRuntimeSeconds} />
       {plan.userConstraints ? (
         <div class="card">

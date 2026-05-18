@@ -8,6 +8,7 @@ import { matchProjects } from '../engine/match-projects.js';
 import { generatePlanContent } from '../engine/write-scripts.js';
 import { runPipeline } from '../engine/pipeline.js';
 import { PlanningEngineError } from '../engine/errors.js';
+import { changePlanFormatProfile } from '../engine/change-format.js';
 import { getNeurocoreClient } from '../neurocore/index.js';
 
 const app = new Hono();
@@ -154,6 +155,51 @@ app.post('/plans/:id/finalize', async (c) => {
     });
   } catch (err) {
     return renderPlanPage(c, id, errorToFlash(err, 'finalize'));
+  }
+});
+
+/**
+ * POST /plans/:id/change-format
+ * Body: { formatProfileId: string }
+ *
+ * Changes the plan's format profile, wiping all format-dependent data
+ * (scenes, hook drafts, title/thumbnail concepts, short_clip deliverables)
+ * and reverting the plan to `projects_matched`. For plans not yet past
+ * `projects_matched`, just updates formatProfileId (no-op wipe).
+ *
+ * Per TECH-SPEC §4.9. Only applies to youtube_advanced plans.
+ */
+app.post('/plans/:id/change-format', async (c) => {
+  const id = c.req.param('id');
+  let body: { formatProfileId?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'invalid JSON body' }, 400);
+  }
+  if (!body.formatProfileId || typeof body.formatProfileId !== 'string') {
+    return c.json({ error: 'formatProfileId is required' }, 400);
+  }
+
+  try {
+    await changePlanFormatProfile(id, body.formatProfileId);
+    // HTMX: redirect to plan detail with success flash.
+    c.header('HX-Redirect', `/plans/${id}?flash=format-changed`);
+    return c.text('', 200);
+  } catch (err) {
+    if (err instanceof PlanningEngineError) {
+      if (err.code === 'CANNOT_CHANGE_AFTER_PUBLISH') {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      if (err.code === 'PLAN_NOT_FOUND') {
+        return c.json({ error: err.message, code: err.code }, 404);
+      }
+      if (err.code === 'WRONG_PLAN_TYPE' || err.code === 'UNKNOWN_FORMAT_PROFILE') {
+        return c.json({ error: err.message, code: err.code }, 400);
+      }
+    }
+    logger.error({ planId: id, err: (err as Error).message }, 'change-format: unexpected error');
+    return c.json({ error: (err as Error).message }, 500);
   }
 });
 

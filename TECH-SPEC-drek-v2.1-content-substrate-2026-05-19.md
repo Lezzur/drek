@@ -133,13 +133,14 @@ function isTransformable(score: BriefScore): boolean {
   return (
     score.scopeFit >= 3.5 &&
     score.audienceMatch >= 3.5 &&
-    (score.visualOutcome < 3.0 || score.storyPotential < 3.0) &&
-    score.aggregate >= 3.0
+    (score.visualOutcome < 3.0 || score.storyPotential < 3.0)
   );
 }
 ```
 
-A brief at `{scopeFit: 2, audienceMatch: 2, visualOutcome: 3, storyPotential: 3}` hits 2.5 composite — **not transformable**, the project itself is wrong-for-channel. A brief at `{scopeFit: 4, audienceMatch: 4, visualOutcome: 1.5, storyPotential: 1.5}` hits 2.75 composite — **transformable**, latent narrative exists.
+The per-axis shape IS the gate — no composite floor. The ideal transformer candidate is exactly the high-technical / weak-narrative profile, which often has a low composite (e.g. 2.75) precisely because the narrative axes are weak. Composite-floor gating would reject the best candidates.
+
+A brief at `{scopeFit: 2, audienceMatch: 2, visualOutcome: 3, storyPotential: 3}` hits 2.5 composite — **not transformable**, the project itself is wrong-for-channel (technical axes too weak). A brief at `{scopeFit: 4, audienceMatch: 4, visualOutcome: 1.5, storyPotential: 1.5}` hits 2.75 composite — **transformable**, latent narrative exists despite the low aggregate.
 
 **Engine step:** `src/engine/transform-brief.ts` — Call 11.5 in the pipeline.
 
@@ -167,16 +168,19 @@ A brief at `{scopeFit: 2, audienceMatch: 2, visualOutcome: 3, storyPotential: 3}
 
 **Persistence — drift-detection-ready (L's input):**
 
-Each `PipelineBrief` gets four additive fields:
+The existing `PipelineBrief.score` field (from v2.0 Call 11) is preserved unchanged — it becomes the pre-transform / raw score. Three additive fields are appended:
 
 ```typescript
-rawScore: BriefScore | null,             // already exists, now explicitly preserved
+// Existing v2.0 field, unchanged — this is the pre-transform score:
+score: BriefScore | null,
+
+// NEW in v2.1 — all default to null:
 transformedBriefText: string | null,
 transformedScore: BriefScore | null,     // re-scored after transformation
 pinnedTechStack: PinnedTechStack | null,
 ```
 
-Re-score is automatic after transform. The full `{before, after}` per-axis delta is reconstructable from `rawScore` + `transformedScore`. Day-50 drift report is a single query.
+No rename, no migration. Re-score after transform writes `transformedScore` alongside the untouched `score`. The full `{before: score, after: transformedScore}` per-axis delta is reconstructable for the drift report. Day-50 drift query is one Firestore scan.
 
 **Coverage rotation: DEFERRED.** Per Shikamaru's "rotation rule should be gated on having data" point. The transformer prompt today contains `CHANNEL COVERAGE: (no data yet — pick the best technical fit)`. When `StackPerformance` lands (piece 6), the coverage block fills in.
 
@@ -377,9 +381,9 @@ The tie-break rule encodes Rick's exact instruction from today: "it is ok to ref
 ### DREK additive schema fields (no migration — defaults are null/empty)
 
 ```typescript
-// PipelineBrief
+// PipelineBrief — the existing v2.0 `score: BriefScore | null` field is
+// unchanged and becomes the pre-transform / raw score. Four NEW fields:
 batchId: string | null = null;
-rawScore: BriefScore | null = null;          // promoted from existing scoring
 transformedBriefText: string | null = null;
 transformedScore: BriefScore | null = null;
 pinnedTechStack: {
@@ -599,7 +603,7 @@ Additive only. No data migrations.
 | YouTube OAuth provisioning | Rick | in progress |
 | Drift threshold tuning — `±0.5` chosen, but the right number emerges from real data | Tony (post-launch) | revisit at day 50 |
 | Should YouTube quota counter persist across service restarts, or reset on boot? | Tony | leaning reset-on-boot; if Rick exceeds 10K/day quota that's a real problem, not a counter issue |
-| Are non-DREK apps ready to consume ContentCatalog reads in v2.1.0, or is this just publishing for future consumers? | Lisa | TBD — DREK writes either way |
+| Are non-DREK apps ready to consume ContentCatalog reads in v2.1.0, or is this just publishing for future consumers? | Lisa | **Resolved 2026-05-19**: No consumers ready in v2.1.0. DREK writes for future readers. Design the API as if consumers exist today so the contract doesn't churn when they arrive. |
 
 ---
 
@@ -613,7 +617,7 @@ Sized for one-commit-each, ship-as-you-go.
 | **M26** | Neurocore TechStackProfile entity + endpoints + seed script. | none | ~2 hr |
 | **M27** | Neurocore ContentCatalog entity + endpoints. | none | ~2 hr |
 | **M28** | DREK Neurocore client read-write upgrade + write queue + ContentCatalog write on publish + drek-side tech-stacks reader (delete local constant). | M26, M27 | ~4 hr |
-| **M29** | Brief Transformer (Call 11.5) — engine + view + transformability gate + drift-check store. | M26 | ~4 hr |
+| **M29** | Brief Transformer (Call 11.5) — engine + view + transformability gate + drift-check store. | M28 (transitively M26) | ~4 hr |
 | **M30** | YouTube client read-only + bootstrap-oauth script + quota tracking. | none | ~3 hr |
 | **M31** | Neurocore StackPerformance entity + nightly refresh cron + transformer prompt fills in coverage block. | M28, M30, Rick's OAuth | ~3 hr |
 | **M32** | Docs (README, CHANGELOG, CLAUDE.md) + v2.1.0 tag. | all | ~1 hr |

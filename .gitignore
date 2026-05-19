@@ -7,5 +7,7 @@ dist
 coverage
 .vitest-cache
 gcp-key.json
+gcp-youtube-oauth.json
+gcp-youtube-token.json
 *.firebase-key.json
 .tsbuildinfo

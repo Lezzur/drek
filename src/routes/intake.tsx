@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { logger } from '../logger.js';
 import {
   createBrief,
+  createBriefBatchWithScoring,
   getBrief,
+  getBriefBatch,
   listBriefs,
   transitionBriefStage,
   promoteBriefToPlan,
@@ -17,6 +19,7 @@ import { briefScoreSchema, BRIEF_STAGES, type BriefStage } from '../db/schemas.j
 import { IntakeListPage } from '../views/intake.js';
 import { BriefDetailPage } from '../views/intake-detail.js';
 import { NewBriefForm } from '../views/intake-new.js';
+import { BatchOverviewPage, NewBatchBriefForm } from '../views/intake-batch.js';
 
 const app = new Hono();
 
@@ -36,6 +39,27 @@ const briefCreateSchema = z.object({
     .max(50000, 'brief text must be ≤50000 characters'),
   sourceUrl: z.string().url('sourceUrl must be a valid URL').optional().or(z.literal('')),
   company: z.string().optional(),
+});
+
+const batchBriefRowSchema = z.object({
+  title: z.string().min(1, 'title is required').max(200, 'title too long'),
+  rawText: z
+    .string()
+    .min(1, 'brief text is required')
+    .max(50000, 'brief text must be ≤50000 characters'),
+  sourceUrl: z
+    .string()
+    .url('sourceUrl must be a valid URL')
+    .optional()
+    .or(z.literal('')),
+  company: z.string().optional(),
+});
+
+const batchCreateSchema = z.object({
+  briefs: z
+    .array(batchBriefRowSchema)
+    .min(1, 'at least one brief is required')
+    .max(25, 'batch size must be ≤25 briefs'),
 });
 
 const stageTransitionSchema = z.object({
@@ -153,6 +177,95 @@ app.post('/intake', async (c) => {
       500,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// GET /intake/batch/new — batch intake form (must come BEFORE /intake/:briefId)
+// ---------------------------------------------------------------------------
+
+app.get('/intake/batch/new', async (c) => {
+  return c.html(<NewBatchBriefForm />);
+});
+
+// ---------------------------------------------------------------------------
+// POST /intake/batch — submit a batch of N briefs
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse browser-style `briefs[0][title]=...&briefs[0][rawText]=...` form
+ * encoding into a dense ordered array. Sparse indices are compacted.
+ */
+function parseBriefRowsFromForm(form: FormData): unknown[] {
+  const rowMap = new Map<number, Record<string, unknown>>();
+  const fieldRe = /^briefs\[(\d+)\]\[(\w+)\]$/;
+  for (const [key, value] of form.entries()) {
+    const match = key.match(fieldRe);
+    if (!match) continue;
+    const idx = Number(match[1]);
+    const field = match[2]!;
+    if (!rowMap.has(idx)) rowMap.set(idx, {});
+    const row = rowMap.get(idx)!;
+    row[field] = value;
+  }
+  const orderedIndices = [...rowMap.keys()].sort((a, b) => a - b);
+  return orderedIndices.map((i) => rowMap.get(i)!);
+}
+
+app.post('/intake/batch', async (c) => {
+  const contentType = c.req.header('content-type') ?? '';
+  let rows: unknown[];
+  if (contentType.includes('application/json')) {
+    const body = (await c.req.json().catch(() => null)) as { briefs?: unknown[] } | null;
+    rows = Array.isArray(body?.briefs) ? body.briefs : [];
+  } else {
+    const form = await c.req.formData();
+    rows = parseBriefRowsFromForm(form);
+  }
+
+  const parsed = batchCreateSchema.safeParse({ briefs: rows });
+  if (!parsed.success) {
+    return c.html(
+      <NewBatchBriefForm
+        values={rows as Array<Record<string, string>>}
+        error={parsed.error.errors[0]?.message ?? 'invalid input'}
+      />,
+      400,
+    );
+  }
+
+  try {
+    const result = await createBriefBatchWithScoring({
+      briefs: parsed.data.briefs.map((r) => ({
+        title: r.title,
+        rawText: r.rawText,
+        sourceUrl: r.sourceUrl && r.sourceUrl.length > 0 ? r.sourceUrl : null,
+        company: r.company && r.company.length > 0 ? r.company : null,
+      })),
+    });
+    return c.redirect(`/intake/batch/${result.batchId}`, 302);
+  } catch (err) {
+    logger.error({ err: (err as Error).message }, 'intake.batch: create failed');
+    return c.html(
+      <NewBatchBriefForm
+        values={parsed.data.briefs as Array<Record<string, string>>}
+        error={`Failed to create batch: ${(err as Error).message}`}
+      />,
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /intake/batch/:batchId — batch overview (HTMX-polled while scoring)
+// ---------------------------------------------------------------------------
+
+app.get('/intake/batch/:batchId', async (c) => {
+  const batchId = c.req.param('batchId');
+  const briefs = await getBriefBatch(batchId);
+  if (briefs.length === 0) {
+    return c.html('<h1>404 — batch not found</h1>', 404);
+  }
+  return c.html(<BatchOverviewPage batchId={batchId} briefs={briefs} />);
 });
 
 // ---------------------------------------------------------------------------

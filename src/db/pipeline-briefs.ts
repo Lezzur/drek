@@ -35,6 +35,7 @@ function docToBrief(id: string, data: Record<string, unknown>): PipelineBrief {
     scoringRationale: (data.scoringRationale as string | null) ?? null,
     stage: data.stage,
     promotedPlanId: (data.promotedPlanId as string | null) ?? null,
+    batchId: (data.batchId as string | null) ?? null,
     createdAt: tsToDate(data.createdAt),
     updatedAt: tsToDate(data.updatedAt),
   });
@@ -55,6 +56,7 @@ export async function createPipelineBrief(
     scoringRationale: input.scoringRationale ?? null,
     stage: input.stage ?? 'candidate',
     promotedPlanId: input.promotedPlanId ?? null,
+    batchId: input.batchId ?? null,
     createdAt: now,
     updatedAt: now,
   };
@@ -107,6 +109,61 @@ export async function patchPipelineBrief(
   await ref.update(update);
   const refreshed = await ref.get();
   return docToBrief(refreshed.id, refreshed.data() as Record<string, unknown>);
+}
+
+/**
+ * List all briefs that share a batchId, oldest-first by insertion order.
+ * Used by the batch-intake overview page to render the row list.
+ */
+export async function listBriefsByBatchId(
+  batchId: string,
+  db: Firestore = getDb(),
+): Promise<PipelineBrief[]> {
+  const snap = await db
+    .collection(COLLECTION)
+    .where('batchId', '==', batchId)
+    .orderBy('createdAt', 'asc')
+    .get();
+  return snap.docs.map((d) => docToBrief(d.id, d.data() as Record<string, unknown>));
+}
+
+/**
+ * Atomically create N briefs with a shared batchId in one Firestore batch.
+ * Used by the batch-intake submit handler — if any write fails, all fail,
+ * so we never end up with partial paste content stranded mid-batch.
+ */
+export async function createBriefBatch(
+  briefs: PipelineBriefCreate[],
+  batchId: string,
+  db: Firestore = getDb(),
+): Promise<PipelineBrief[]> {
+  if (briefs.length === 0) return [];
+  if (briefs.length > 25) {
+    throw new Error(`batch size ${briefs.length} exceeds max 25`);
+  }
+  const now = new Date();
+  const batch = db.batch();
+  const persisted: PipelineBrief[] = [];
+  for (const input of briefs) {
+    const id = makeId('brief');
+    const doc = {
+      title: input.title,
+      company: input.company ?? null,
+      sourceUrl: input.sourceUrl ?? null,
+      rawText: input.rawText,
+      score: input.score ?? null,
+      scoringRationale: input.scoringRationale ?? null,
+      stage: input.stage ?? 'candidate',
+      promotedPlanId: input.promotedPlanId ?? null,
+      batchId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    batch.set(db.collection(COLLECTION).doc(id), doc);
+    persisted.push(docToBrief(id, doc));
+  }
+  await batch.commit();
+  return persisted;
 }
 
 /** Per-stage counts for the queue depth indicator. Used by /intake to

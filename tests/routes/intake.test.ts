@@ -14,6 +14,8 @@ const mockCreateBrief = vi.fn();
 const mockTransitionBriefStage = vi.fn();
 const mockPromoteBriefToPlan = vi.fn();
 const mockUpdateBriefScore = vi.fn();
+const mockCreateBriefBatchWithScoring = vi.fn();
+const mockGetBriefBatch = vi.fn();
 
 vi.mock('../../src/intake/service.js', () => ({
   listBriefs: (...args: unknown[]) => mockListBriefs(...args),
@@ -22,6 +24,9 @@ vi.mock('../../src/intake/service.js', () => ({
   transitionBriefStage: (...args: unknown[]) => mockTransitionBriefStage(...args),
   promoteBriefToPlan: (...args: unknown[]) => mockPromoteBriefToPlan(...args),
   updateBriefScore: (...args: unknown[]) => mockUpdateBriefScore(...args),
+  createBriefBatchWithScoring: (...args: unknown[]) =>
+    mockCreateBriefBatchWithScoring(...args),
+  getBriefBatch: (...args: unknown[]) => mockGetBriefBatch(...args),
 }));
 
 const mockScoreBriefViaLLM = vi.fn();
@@ -75,6 +80,7 @@ function fakeBrief(overrides: Partial<PipelineBrief> = {}): PipelineBrief {
     scoringRationale: null,
     stage: 'candidate',
     promotedPlanId: null,
+    batchId: null,
     createdAt: new Date('2026-05-01T00:00:00Z'),
     updatedAt: new Date('2026-05-01T00:00:00Z'),
     ...overrides,
@@ -325,5 +331,175 @@ describe('POST /intake/:id/stage', () => {
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('INVALID_STAGE_TRANSITION');
+  });
+});
+
+// ===========================================================================
+// Batch intake routes (M25)
+// ===========================================================================
+
+describe('GET /intake/batch/new', () => {
+  it('renders the multi-row form with 3 default rows', async () => {
+    const app = createApp();
+    const res = await app.request('/intake/batch/new');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('Add briefs (batch)');
+    expect(html).toContain('Brief #1');
+    expect(html).toContain('Brief #2');
+    expect(html).toContain('Brief #3');
+    expect(html).toContain('Score all');
+    expect(html).toContain('+ Add another brief');
+  });
+
+  it('is routed BEFORE /intake/:briefId so the wildcard does not swallow it', async () => {
+    // If this route lost order, /intake/batch/new would match /intake/:briefId
+    // with briefId="batch" and trigger getBrief.
+    mockGetBrief.mockClear();
+    const app = createApp();
+    const res = await app.request('/intake/batch/new');
+    expect(res.status).toBe(200);
+    expect(mockGetBrief).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /intake/batch', () => {
+  beforeEach(() => {
+    mockCreateBriefBatchWithScoring.mockReset();
+  });
+
+  it('parses indexed form encoding into an ordered briefs array', async () => {
+    mockCreateBriefBatchWithScoring.mockResolvedValue({
+      batchId: 'batch_abc',
+      briefs: [],
+    });
+
+    const form = new FormData();
+    form.set('briefs[0][title]', 'First');
+    form.set('briefs[0][rawText]', 'body1');
+    form.set('briefs[1][title]', 'Second');
+    form.set('briefs[1][rawText]', 'body2');
+    form.set('briefs[1][sourceUrl]', 'https://upwork.com/jobs/123');
+
+    const app = createApp();
+    const res = await app.request('/intake/batch', {
+      method: 'POST',
+      body: form,
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/intake/batch/batch_abc');
+
+    expect(mockCreateBriefBatchWithScoring).toHaveBeenCalledTimes(1);
+    const call = mockCreateBriefBatchWithScoring.mock.calls[0]![0]!;
+    expect(call.briefs).toHaveLength(2);
+    expect(call.briefs[0]).toMatchObject({ title: 'First', rawText: 'body1', sourceUrl: null });
+    expect(call.briefs[1]).toMatchObject({
+      title: 'Second',
+      rawText: 'body2',
+      sourceUrl: 'https://upwork.com/jobs/123',
+    });
+  });
+
+  it('accepts a JSON body with { briefs: [...] }', async () => {
+    mockCreateBriefBatchWithScoring.mockResolvedValue({
+      batchId: 'batch_json',
+      briefs: [],
+    });
+
+    const app = createApp();
+    const res = await app.request('/intake/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        briefs: [
+          { title: 'A', rawText: 'a' },
+          { title: 'B', rawText: 'b' },
+        ],
+      }),
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/intake/batch/batch_json');
+  });
+
+  it('400s with validation error when no briefs provided', async () => {
+    const app = createApp();
+    const res = await app.request('/intake/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ briefs: [] }),
+    });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain('at least one brief');
+  });
+
+  it('400s when any row is missing title or rawText', async () => {
+    const app = createApp();
+    const form = new FormData();
+    form.set('briefs[0][title]', 'Only a title, no body');
+    // No rawText
+    const res = await app.request('/intake/batch', {
+      method: 'POST',
+      body: form,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400s when batch exceeds 25 briefs', async () => {
+    const briefs = Array.from({ length: 26 }, (_, i) => ({
+      title: `Brief ${i}`,
+      rawText: `body ${i}`,
+    }));
+    const app = createApp();
+    const res = await app.request('/intake/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ briefs }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /intake/batch/:batchId', () => {
+  beforeEach(() => {
+    mockGetBriefBatch.mockReset();
+  });
+
+  it('renders the overview with live polling while scoring is in progress', async () => {
+    mockGetBriefBatch.mockResolvedValue([
+      fakeBrief({ id: 'b1', title: 'First', batchId: 'batch_x' }),
+      fakeBrief({ id: 'b2', title: 'Second', batchId: 'batch_x' }),
+    ]);
+
+    const app = createApp();
+    const res = await app.request('/intake/batch/batch_x');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('First');
+    expect(html).toContain('Second');
+    expect(html).toContain('Scoring 2 / 2');
+    expect(html).toContain('hx-trigger="every 2s"');
+  });
+
+  it('drops the polling trigger when all rows are scored', async () => {
+    mockGetBriefBatch.mockResolvedValue([
+      fakeBrief({ id: 'b1', title: 'First', score: fakeScore() }),
+      fakeBrief({ id: 'b2', title: 'Second', score: fakeScore() }),
+    ]);
+
+    const app = createApp();
+    const res = await app.request('/intake/batch/batch_x');
+    const html = await res.text();
+    expect(html).toContain('All scored');
+    expect(html).not.toContain('hx-trigger');
+  });
+
+  it('404 when batchId has no matching briefs', async () => {
+    mockGetBriefBatch.mockResolvedValue([]);
+    const app = createApp();
+    const res = await app.request('/intake/batch/batch_does_not_exist');
+    expect(res.status).toBe(404);
   });
 });

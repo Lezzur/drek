@@ -1,9 +1,12 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { getDb } from '../db/firestore.js';
 import { logger } from '../logger.js';
+import { randomUUID } from 'node:crypto';
 import {
+  createBriefBatch,
   createPipelineBrief,
   getPipelineBrief,
+  listBriefsByBatchId,
   listPipelineBriefs,
   patchPipelineBrief,
   type BriefSort,
@@ -18,6 +21,7 @@ import {
   type PipelineBrief,
   type PipelineBriefCreate,
 } from '../db/schemas.js';
+import { scoreBriefViaLLM } from './scoring.js';
 import {
   getFormatProfile,
   FormatProfileNotFoundError,
@@ -295,6 +299,103 @@ export async function promoteBriefToPlan(
   }
 
   return { planId, deliverableId };
+}
+
+// ---------------------------------------------------------------------------
+// Batch intake (v2.1 M25)
+// ---------------------------------------------------------------------------
+
+/** Concurrency cap for parallel LLM scoring within one batch. Picked to stay
+ *  inside the Claude CLI's per-minute rate envelope without serializing. */
+const BATCH_SCORING_CONCURRENCY = 3;
+
+export interface CreateBriefBatchInput {
+  briefs: PipelineBriefCreate[];
+}
+
+export interface CreateBriefBatchResult {
+  batchId: string;
+  briefs: PipelineBrief[];
+}
+
+/**
+ * Persist N briefs in one atomic Firestore batch with a shared `batchId`,
+ * then kick off LLM scoring asynchronously (capped at
+ * BATCH_SCORING_CONCURRENCY parallel calls). Returns immediately after the
+ * persist — scoring continues in the background; clients poll
+ * /intake/batch/:batchId for live progress.
+ *
+ * Persist-first semantics: even if every LLM call fails, the brief docs
+ * are already in Firestore. Rick can re-score individually from the row.
+ */
+export async function createBriefBatchWithScoring(
+  input: CreateBriefBatchInput,
+  db: Firestore = getDb(),
+): Promise<CreateBriefBatchResult> {
+  if (input.briefs.length === 0) {
+    throw new Error('batch must contain at least one brief');
+  }
+  const batchId = `batch_${randomUUID().replace(/-/g, '')}`;
+  const persisted = await createBriefBatch(input.briefs, batchId, db);
+
+  // Fire-and-forget scoring. We intentionally don't await — the route
+  // returns immediately and the client polls. Scoring errors get logged
+  // and surface in the per-row score=null state.
+  void scoreBriefBatchInBackground(persisted, db);
+
+  logger.info(
+    { batchId, count: persisted.length },
+    'intake.batch: persisted, scoring queued',
+  );
+  return { batchId, briefs: persisted };
+}
+
+/**
+ * Score a batch of briefs in parallel with a concurrency cap. Each per-brief
+ * failure is logged and isolated — one bad brief doesn't break the rest.
+ *
+ * Exported for tests; in production the only caller is
+ * `createBriefBatchWithScoring`.
+ */
+export async function scoreBriefBatchInBackground(
+  briefs: PipelineBrief[],
+  db: Firestore = getDb(),
+  opts: { concurrency?: number } = {},
+): Promise<void> {
+  const concurrency = opts.concurrency ?? BATCH_SCORING_CONCURRENCY;
+  const queue = [...briefs];
+  const workers: Array<Promise<void>> = [];
+
+  const worker = async (): Promise<void> => {
+    while (queue.length > 0) {
+      const next = queue.shift();
+      if (!next) return;
+      try {
+        await scoreBriefViaLLM(next.id, { db });
+      } catch (err) {
+        logger.warn(
+          { briefId: next.id, batchId: next.batchId, err: (err as Error).message },
+          'intake.batch: per-brief scoring failed; row remains unscored',
+        );
+      }
+    }
+  };
+
+  for (let i = 0; i < concurrency; i++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+}
+
+/**
+ * List all briefs in a batch, in insertion order. Used by the batch overview
+ * page.
+ */
+export async function getBriefBatch(
+  batchId: string,
+  db: Firestore = getDb(),
+): Promise<PipelineBrief[]> {
+  return listBriefsByBatchId(batchId, db);
 }
 
 // Re-export for ergonomic imports by route handlers.

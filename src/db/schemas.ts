@@ -491,6 +491,9 @@ export const pipelineBriefSchema = z.object({
   scoringRationale: z.string().nullable().default(null),
   stage: z.enum(BRIEF_STAGES),
   promotedPlanId: z.string().nullable().default(null),
+  /** v2.1: group briefs submitted in the same batch-intake form. Null for
+   *  briefs created via the single-brief intake or pre-v2.1 docs. */
+  batchId: z.string().nullable().default(null),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -505,6 +508,7 @@ export const pipelineBriefCreateSchema = pipelineBriefSchema
     promotedPlanId: true,
     company: true,
     sourceUrl: true,
+    batchId: true,
   });
 export type PipelineBriefCreate = z.infer<typeof pipelineBriefCreateSchema>;
 

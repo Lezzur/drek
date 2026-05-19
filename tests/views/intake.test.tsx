@@ -15,6 +15,7 @@ function fakeBrief(overrides: Partial<PipelineBrief> = {}): PipelineBrief {
     scoringRationale: null,
     stage: 'candidate',
     promotedPlanId: null,
+    batchId: null,
     createdAt: new Date('2026-05-01T00:00:00Z'),
     updatedAt: new Date('2026-05-01T00:00:00Z'),
     ...overrides,

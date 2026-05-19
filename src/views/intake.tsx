@@ -145,7 +145,8 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
       <div class="row" style="margin-bottom:8px;">
         <h1 style="margin:0;">Intake pipeline</h1>
         <span class="spacer" />
-        <a class="btn accent" href="/intake/new">Add brief</a>
+        <a class="btn secondary" href="/intake/new">Add brief</a>
+        <a class="btn accent" href="/intake/batch/new">Add batch</a>
       </div>
       <p class="muted" style="margin: 6px 0 16px;">
         Source and vet briefs before promoting them to youtube_advanced plans.

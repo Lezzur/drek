@@ -30,16 +30,20 @@ vi.mock('../../src/logger.js', () => ({
 }));
 
 import {
+  applyBulkBriefAction,
   createBrief,
+  deleteBrief,
   getBrief,
   listBriefs,
   promoteBriefToPlan,
   transitionBriefStage,
   updateBriefScore,
 } from '../../src/intake/service.js';
+import { getPipelineBrief } from '../../src/db/pipeline-briefs.js';
 import { IntakeError } from '../../src/intake/errors.js';
 import { AudienceProfileNotFoundError } from '../../src/neurocore/audience-profiles.js';
 import type { BriefScore } from '../../src/db/schemas.js';
+import type { Firestore } from 'firebase-admin/firestore';
 
 let db: FakeFirestore;
 
@@ -309,5 +313,111 @@ describe('promoteBriefToPlan', () => {
         db: db as any,
       }),
     ).rejects.toThrow('Neurocore down');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bulk actions (M26.5)
+// ---------------------------------------------------------------------------
+
+describe('applyBulkBriefAction — retire', () => {
+  it('retires all matching briefs and reports succeeded count', async () => {
+    const b1 = await createBrief({ title: 'A', rawText: 'a' }, db as unknown as Firestore);
+    const b2 = await createBrief({ title: 'B', rawText: 'b' }, db as unknown as Firestore);
+    const b3 = await createBrief({ title: 'C', rawText: 'c' }, db as unknown as Firestore);
+
+    const result = await applyBulkBriefAction(
+      [b1.id, b2.id, b3.id],
+      'retire',
+      db as unknown as Firestore,
+    );
+
+    expect(result.requested).toBe(3);
+    expect(result.succeeded).toBe(3);
+    expect(result.skipped).toBe(0);
+    expect(result.failures).toEqual([]);
+
+    const refreshed = await getPipelineBrief(b1.id, db as unknown as Firestore);
+    expect(refreshed?.stage).toBe('retired');
+  });
+
+  it('skips already-retired briefs (idempotent)', async () => {
+    const b = await createBrief({ title: 'X', rawText: 'x' }, db as unknown as Firestore);
+    await applyBulkBriefAction([b.id], 'retire', db as unknown as Firestore);
+    const second = await applyBulkBriefAction([b.id], 'retire', db as unknown as Firestore);
+    expect(second.skipped).toBe(1);
+    expect(second.succeeded).toBe(0);
+  });
+
+  it('skips non-existent briefIds without failing the batch', async () => {
+    const b = await createBrief({ title: 'X', rawText: 'x' }, db as unknown as Firestore);
+    const result = await applyBulkBriefAction(
+      [b.id, 'brief_does_not_exist'],
+      'retire',
+      db as unknown as Firestore,
+    );
+    expect(result.succeeded).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.failures).toEqual([]);
+  });
+});
+
+describe('applyBulkBriefAction — delete', () => {
+  it('hard-deletes all matching briefs in one atomic batch', async () => {
+    const b1 = await createBrief({ title: 'A', rawText: 'a' }, db as unknown as Firestore);
+    const b2 = await createBrief({ title: 'B', rawText: 'b' }, db as unknown as Firestore);
+
+    const result = await applyBulkBriefAction(
+      [b1.id, b2.id],
+      'delete',
+      db as unknown as Firestore,
+    );
+
+    expect(result.action).toBe('delete');
+    expect(result.requested).toBe(2);
+    expect(result.succeeded).toBe(2);
+
+    expect(await getPipelineBrief(b1.id, db as unknown as Firestore)).toBeNull();
+    expect(await getPipelineBrief(b2.id, db as unknown as Firestore)).toBeNull();
+  });
+
+  it('counts non-existent ids as skipped', async () => {
+    const b = await createBrief({ title: 'X', rawText: 'x' }, db as unknown as Firestore);
+    const result = await applyBulkBriefAction(
+      [b.id, 'brief_ghost1', 'brief_ghost2'],
+      'delete',
+      db as unknown as Firestore,
+    );
+    expect(result.succeeded).toBe(1);
+    expect(result.skipped).toBe(2);
+  });
+});
+
+describe('applyBulkBriefAction — guards', () => {
+  it('empty briefIds returns a no-op summary', async () => {
+    const result = await applyBulkBriefAction([], 'retire', db as unknown as Firestore);
+    expect(result.requested).toBe(0);
+    expect(result.succeeded).toBe(0);
+  });
+
+  it('throws BULK_TOO_LARGE when over 50 briefIds', async () => {
+    const ids = Array.from({ length: 51 }, (_, i) => `brief_${i}`);
+    await expect(
+      applyBulkBriefAction(ids, 'retire', db as unknown as Firestore),
+    ).rejects.toMatchObject({ code: 'BULK_TOO_LARGE' });
+  });
+});
+
+describe('deleteBrief', () => {
+  it('hard-deletes an existing brief', async () => {
+    const b = await createBrief({ title: 'X', rawText: 'x' }, db as unknown as Firestore);
+    const result = await deleteBrief(b.id, db as unknown as Firestore);
+    expect(result.deleted).toBe(true);
+    expect(await getPipelineBrief(b.id, db as unknown as Firestore)).toBeNull();
+  });
+
+  it('idempotent — returns deleted:false for unknown id', async () => {
+    const result = await deleteBrief('brief_never_existed', db as unknown as Firestore);
+    expect(result.deleted).toBe(false);
   });
 });

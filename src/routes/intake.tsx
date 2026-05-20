@@ -2,14 +2,17 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import {
+  applyBulkBriefAction,
   createBrief,
   createBriefBatchWithScoring,
+  deleteBrief,
   getBrief,
   getBriefBatch,
   listBriefs,
   transitionBriefStage,
   promoteBriefToPlan,
   updateBriefScore,
+  type BulkBriefAction,
 } from '../intake/service.js';
 import { scoreBriefViaLLM } from '../intake/scoring.js';
 import { IntakeError } from '../intake/errors.js';
@@ -78,6 +81,11 @@ const manualScoreSchema = z.object({
   scopeFit: z.coerce.number().int().min(1).max(5),
   audienceMatch: z.coerce.number().int().min(1).max(5),
   scoringRationale: z.string().optional(),
+});
+
+const bulkActionSchema = z.object({
+  briefIds: z.array(z.string().min(1)).min(1, 'at least one briefId required').max(50, 'max 50 briefs per bulk action'),
+  action: z.enum(['retire', 'delete']),
 });
 
 // ---------------------------------------------------------------------------
@@ -266,6 +274,86 @@ app.get('/intake/batch/:batchId', async (c) => {
     return c.html('<h1>404 — batch not found</h1>', 404);
   }
   return c.html(<BatchOverviewPage batchId={batchId} briefs={briefs} />);
+});
+
+// ---------------------------------------------------------------------------
+// POST /intake/bulk-action — multi-select operations from the pipeline list
+// (must come BEFORE /intake/:briefId so the wildcard doesn't swallow it)
+// ---------------------------------------------------------------------------
+
+app.post('/intake/bulk-action', async (c) => {
+  const contentType = c.req.header('content-type') ?? '';
+  let body: { briefIds?: string[] | string; action?: BulkBriefAction };
+  if (contentType.includes('application/json')) {
+    body = (await c.req.json().catch(() => ({}))) as typeof body;
+  } else {
+    const form = await c.req.formData();
+    // Form-encoded multi-select sends repeated briefIds entries OR a single
+    // comma-joined string; accept both shapes for browser ergonomics.
+    const ids = form.getAll('briefIds').map(String).filter(Boolean);
+    body = {
+      briefIds: ids.length > 0 ? ids : undefined,
+      action: form.get('action') as BulkBriefAction | undefined,
+    };
+  }
+
+  // Normalize comma-joined string → array.
+  const normalizedIds = Array.isArray(body.briefIds)
+    ? body.briefIds
+    : typeof body.briefIds === 'string'
+    ? body.briefIds.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const parsed = bulkActionSchema.safeParse({
+    briefIds: normalizedIds,
+    action: body.action,
+  });
+  if (!parsed.success) {
+    return c.json(
+      { error: { code: 'INVALID_INPUT', message: parsed.error.errors[0]?.message ?? 'invalid bulk action' } },
+      400,
+    );
+  }
+
+  try {
+    const result = await applyBulkBriefAction(parsed.data.briefIds, parsed.data.action);
+    logger.info(
+      { action: result.action, requested: result.requested, succeeded: result.succeeded, skipped: result.skipped, failureCount: result.failures.length },
+      'intake.bulk-action',
+    );
+    // HTMX clients get a redirect back to /intake; JSON clients get the result.
+    if (c.req.header('hx-request')) {
+      c.header('HX-Redirect', '/intake');
+      return c.text('', 200);
+    }
+    return c.json({ result });
+  } catch (err) {
+    if (err instanceof IntakeError) {
+      const status = err.code === 'BULK_TOO_LARGE' ? 400 : 500;
+      return c.json({ error: { code: err.code, message: err.message } }, status);
+    }
+    logger.error({ err: (err as Error).message }, 'intake.bulk-action: unexpected error');
+    throw err;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /intake/:briefId — hard-delete a single brief
+// ---------------------------------------------------------------------------
+
+app.delete('/intake/:briefId', async (c) => {
+  const briefId = c.req.param('briefId');
+  try {
+    const { deleted } = await deleteBrief(briefId);
+    if (c.req.header('hx-request')) {
+      c.header('HX-Redirect', '/intake');
+      return c.text('', 200);
+    }
+    return c.json({ briefId, deleted });
+  } catch (err) {
+    logger.error({ briefId, err: (err as Error).message }, 'intake.delete: failed');
+    throw err;
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,8 @@ export type IntakeErrorCode =
   | 'UNKNOWN_AUDIENCE_PROFILE'
   | 'LLM_FAILED'
   | 'INVALID_OUTPUT'              // LLM scoring output didn't parse after retry
-  | 'PERSIST_FAILED';
+  | 'PERSIST_FAILED'
+  | 'BULK_TOO_LARGE';             // bulk action exceeded the 50-brief cap
 
 export class IntakeError extends Error {
   public readonly code: IntakeErrorCode;

@@ -85,4 +85,56 @@ describe('IntakeListPage', () => {
     const html = toHtml(IntakeListPage({ briefs: [scored], queueDepth: 5 }));
     expect(html).toContain('4.0');
   });
+
+  // ---- M26.5 column layout + multi-select ----
+
+  it('renders the column header row with Score / Status / Actions labels', () => {
+    const html = toHtml(IntakeListPage({ briefs: [fakeBrief()], queueDepth: 5 }));
+    expect(html).toContain('>Brief<');
+    expect(html).toContain('>Score<');
+    expect(html).toContain('>Status<');
+    expect(html).toContain('>Actions<');
+  });
+
+  it('renders a checkbox per row with name=briefIds and the brief id as value', () => {
+    const briefs = [
+      fakeBrief({ id: 'brief_a', title: 'A' }),
+      fakeBrief({ id: 'brief_b', title: 'B' }),
+    ];
+    const html = toHtml(IntakeListPage({ briefs, queueDepth: 5 }));
+    expect(html).toContain('name="briefIds" value="brief_a"');
+    expect(html).toContain('name="briefIds" value="brief_b"');
+    expect(html).toContain('id="brief-select-all"');
+  });
+
+  it('renders the bulk action bar (hidden by default, shown via JS)', () => {
+    const html = toHtml(IntakeListPage({ briefs: [fakeBrief()], queueDepth: 5 }));
+    expect(html).toContain('id="bulk-action-bar"');
+    expect(html).toContain('Retire selected');
+    expect(html).toContain('Delete selected');
+    expect(html).toContain('data-bulk-action="retire"');
+    expect(html).toContain('data-bulk-action="delete"');
+    // Default hidden — script flips display when selection > 0
+    expect(html).toMatch(/id="bulk-action-bar"[^>]*style="[^"]*display:none/);
+  });
+
+  it('embeds the bulk-action client script', () => {
+    const html = toHtml(IntakeListPage({ briefs: [fakeBrief()], queueDepth: 5 }));
+    expect(html).toContain('/intake/bulk-action');
+    expect(html).toContain('selectedIds');
+    expect(html).toContain('bulk-selected-count');
+  });
+
+  it('shows em-dash placeholder for unscored briefs in the score column', () => {
+    const unscored = fakeBrief({ score: null });
+    const html = toHtml(IntakeListPage({ briefs: [unscored], queueDepth: 5 }));
+    // The score column is centered + has the em-dash for null-score briefs
+    expect(html).toMatch(/>—</);
+  });
+
+  it('"Add batch" button is visible alongside "Add brief"', () => {
+    const html = toHtml(IntakeListPage({ briefs: [], queueDepth: 5 }));
+    expect(html).toContain('href="/intake/batch/new"');
+    expect(html).toContain('Add batch');
+  });
 });

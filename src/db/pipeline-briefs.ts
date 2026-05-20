@@ -166,6 +166,46 @@ export async function createBriefBatch(
   return persisted;
 }
 
+/**
+ * Hard-delete a brief. Used by the bulk-delete intake action. Does NOT
+ * cascade — `pipeline_briefs` has no subcollections in v2.1. Returns
+ * false if the brief didn't exist (idempotent — bulk-delete of already-
+ * gone briefs is a no-op, not an error).
+ */
+export async function deletePipelineBrief(
+  id: string,
+  db: Firestore = getDb(),
+): Promise<boolean> {
+  const ref = db.collection(COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return false;
+  await ref.delete();
+  return true;
+}
+
+/**
+ * Bulk hard-delete N briefs in one Firestore batch (atomic). Skips ids
+ * that don't exist; returns the count of actual deletions.
+ */
+export async function deletePipelineBriefsBulk(
+  ids: string[],
+  db: Firestore = getDb(),
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  // Firestore batch caps at 500 writes; we cap at 50 for ergonomics.
+  if (ids.length > 50) {
+    throw new Error(`bulk delete size ${ids.length} exceeds max 50`);
+  }
+  const refs = ids.map((id) => db.collection(COLLECTION).doc(id));
+  const snaps = await Promise.all(refs.map((r) => r.get()));
+  const existing = refs.filter((_, i) => snaps[i]!.exists);
+  if (existing.length === 0) return 0;
+  const batch = db.batch();
+  for (const ref of existing) batch.delete(ref);
+  await batch.commit();
+  return existing.length;
+}
+
 /** Per-stage counts for the queue depth indicator. Used by /intake to
  *  warn Rick when the candidate+vetted pool is < 3 briefs deep. */
 export async function countBriefsByStage(

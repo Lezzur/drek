@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import {
   createBriefBatch,
   createPipelineBrief,
+  deletePipelineBrief,
+  deletePipelineBriefsBulk,
   getPipelineBrief,
   listBriefsByBatchId,
   listPipelineBriefs,
@@ -396,6 +398,98 @@ export async function getBriefBatch(
   db: Firestore = getDb(),
 ): Promise<PipelineBrief[]> {
   return listBriefsByBatchId(batchId, db);
+}
+
+// ---------------------------------------------------------------------------
+// Bulk actions on the intake list (delete + retire)
+// ---------------------------------------------------------------------------
+
+export type BulkBriefAction = 'retire' | 'delete';
+
+export interface BulkBriefActionResult {
+  action: BulkBriefAction;
+  requested: number;
+  succeeded: number;
+  skipped: number;
+  failures: Array<{ briefId: string; reason: string }>;
+}
+
+/**
+ * Apply an action across multiple briefs. `retire` transitions stage to
+ * 'retired' (soft — preserves the doc). `delete` hard-deletes the doc.
+ *
+ * Best-effort semantics: per-brief failures don't stop the rest. Returns
+ * a summary the route layer surfaces to the user. Caps at 50 ids per call
+ * to bound the impact of a bad client.
+ */
+export async function applyBulkBriefAction(
+  briefIds: string[],
+  action: BulkBriefAction,
+  db: Firestore = getDb(),
+): Promise<BulkBriefActionResult> {
+  if (briefIds.length === 0) {
+    return { action, requested: 0, succeeded: 0, skipped: 0, failures: [] };
+  }
+  if (briefIds.length > 50) {
+    throw new IntakeError(
+      'BULK_TOO_LARGE',
+      `bulk action requested ${briefIds.length} briefs; max 50`,
+      { detail: { requested: briefIds.length } },
+    );
+  }
+
+  if (action === 'delete') {
+    // deletePipelineBriefsBulk is one Firestore batch — atomic + fast.
+    try {
+      const succeeded = await deletePipelineBriefsBulk(briefIds, db);
+      const skipped = briefIds.length - succeeded;
+      return { action, requested: briefIds.length, succeeded, skipped, failures: [] };
+    } catch (err) {
+      throw new IntakeError(
+        'PERSIST_FAILED',
+        `bulk delete failed: ${(err as Error).message}`,
+        { detail: { briefIds } },
+      );
+    }
+  }
+
+  // 'retire' — apply individually so per-brief transition errors are isolated.
+  let succeeded = 0;
+  let skipped = 0;
+  const failures: Array<{ briefId: string; reason: string }> = [];
+  for (const id of briefIds) {
+    try {
+      const brief = await getPipelineBrief(id, db);
+      if (!brief) {
+        skipped += 1;
+        continue;
+      }
+      if (brief.stage === 'retired') {
+        skipped += 1;
+        continue;
+      }
+      await transitionBriefStage(id, 'retired', db);
+      succeeded += 1;
+    } catch (err) {
+      failures.push({
+        briefId: id,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return { action, requested: briefIds.length, succeeded, skipped, failures };
+}
+
+/**
+ * Hard-delete a single brief. Idempotent — returns `deleted: false` if
+ * the brief was already gone.
+ */
+export async function deleteBrief(
+  id: string,
+  db: Firestore = getDb(),
+): Promise<{ deleted: boolean }> {
+  const ok = await deletePipelineBrief(id, db);
+  return { deleted: ok };
 }
 
 // Re-export for ergonomic imports by route handlers.

@@ -16,6 +16,8 @@ const mockPromoteBriefToPlan = vi.fn();
 const mockUpdateBriefScore = vi.fn();
 const mockCreateBriefBatchWithScoring = vi.fn();
 const mockGetBriefBatch = vi.fn();
+const mockApplyBulkBriefAction = vi.fn();
+const mockDeleteBrief = vi.fn();
 
 vi.mock('../../src/intake/service.js', () => ({
   listBriefs: (...args: unknown[]) => mockListBriefs(...args),
@@ -27,6 +29,8 @@ vi.mock('../../src/intake/service.js', () => ({
   createBriefBatchWithScoring: (...args: unknown[]) =>
     mockCreateBriefBatchWithScoring(...args),
   getBriefBatch: (...args: unknown[]) => mockGetBriefBatch(...args),
+  applyBulkBriefAction: (...args: unknown[]) => mockApplyBulkBriefAction(...args),
+  deleteBrief: (...args: unknown[]) => mockDeleteBrief(...args),
 }));
 
 const mockScoreBriefViaLLM = vi.fn();
@@ -501,5 +505,160 @@ describe('GET /intake/batch/:batchId', () => {
     const app = createApp();
     const res = await app.request('/intake/batch/batch_does_not_exist');
     expect(res.status).toBe(404);
+  });
+});
+
+// ===========================================================================
+// Bulk action routes (intake list multi-select)
+// ===========================================================================
+
+describe('POST /intake/bulk-action', () => {
+  beforeEach(() => {
+    mockApplyBulkBriefAction.mockReset();
+  });
+
+  it('parses repeated form briefIds + action and returns HX-Redirect for HTMX', async () => {
+    mockApplyBulkBriefAction.mockResolvedValue({
+      action: 'retire',
+      requested: 3,
+      succeeded: 3,
+      skipped: 0,
+      failures: [],
+    });
+
+    const form = new FormData();
+    form.append('briefIds', 'b1');
+    form.append('briefIds', 'b2');
+    form.append('briefIds', 'b3');
+    form.append('action', 'retire');
+
+    const app = createApp();
+    const res = await app.request('/intake/bulk-action', {
+      method: 'POST',
+      body: form,
+      headers: { 'hx-request': 'true' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('HX-Redirect')).toBe('/intake');
+    expect(mockApplyBulkBriefAction).toHaveBeenCalledWith(
+      ['b1', 'b2', 'b3'],
+      'retire',
+    );
+  });
+
+  it('accepts JSON body with briefIds array', async () => {
+    mockApplyBulkBriefAction.mockResolvedValue({
+      action: 'delete',
+      requested: 2,
+      succeeded: 2,
+      skipped: 0,
+      failures: [],
+    });
+
+    const app = createApp();
+    const res = await app.request('/intake/bulk-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ briefIds: ['x', 'y'], action: 'delete' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: { action: string; succeeded: number } };
+    expect(body.result.action).toBe('delete');
+    expect(body.result.succeeded).toBe(2);
+  });
+
+  it('400 when briefIds missing', async () => {
+    const app = createApp();
+    const res = await app.request('/intake/bulk-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'retire' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when action is invalid', async () => {
+    const app = createApp();
+    const res = await app.request('/intake/bulk-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ briefIds: ['a'], action: 'incinerate' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 when more than 50 briefIds', async () => {
+    const ids = Array.from({ length: 51 }, (_, i) => `b${i}`);
+    const app = createApp();
+    const res = await app.request('/intake/bulk-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ briefIds: ids, action: 'retire' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 from BULK_TOO_LARGE service error', async () => {
+    mockApplyBulkBriefAction.mockRejectedValue(
+      new IntakeError('BULK_TOO_LARGE', 'too many'),
+    );
+    const app = createApp();
+    const res = await app.request('/intake/bulk-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ briefIds: ['a'], action: 'retire' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('is mounted BEFORE /intake/:briefId — no wildcard collision', async () => {
+    mockGetBrief.mockClear();
+    mockApplyBulkBriefAction.mockResolvedValue({
+      action: 'retire', requested: 1, succeeded: 1, skipped: 0, failures: [],
+    });
+    const app = createApp();
+    const res = await app.request('/intake/bulk-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ briefIds: ['a'], action: 'retire' }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockGetBrief).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /intake/:briefId', () => {
+  beforeEach(() => {
+    mockDeleteBrief.mockReset();
+  });
+
+  it('hard-deletes the brief and returns JSON when not HTMX', async () => {
+    mockDeleteBrief.mockResolvedValue({ deleted: true });
+    const app = createApp();
+    const res = await app.request('/intake/brief_zzz', { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { briefId: string; deleted: boolean };
+    expect(body).toEqual({ briefId: 'brief_zzz', deleted: true });
+    expect(mockDeleteBrief).toHaveBeenCalledWith('brief_zzz');
+  });
+
+  it('returns HX-Redirect when called from HTMX', async () => {
+    mockDeleteBrief.mockResolvedValue({ deleted: true });
+    const app = createApp();
+    const res = await app.request('/intake/brief_zzz', {
+      method: 'DELETE',
+      headers: { 'hx-request': 'true' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('HX-Redirect')).toBe('/intake');
+  });
+
+  it('idempotent — returns deleted:false when brief did not exist', async () => {
+    mockDeleteBrief.mockResolvedValue({ deleted: false });
+    const app = createApp();
+    const res = await app.request('/intake/brief_gone', { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { deleted: boolean };
+    expect(body.deleted).toBe(false);
   });
 });

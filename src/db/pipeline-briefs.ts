@@ -118,6 +118,26 @@ export async function patchPipelineBrief(
 }
 
 /**
+ * Look up the (at most one) brief that was promoted to a given plan id.
+ * Used by the publish flow to recover the brief's pinnedTechStack for
+ * the ContentCatalog write. Returns null if the plan wasn't created via
+ * Brief promotion (manual youtube plans, listing-triggered cover letters).
+ */
+export async function getPipelineBriefByPromotedPlanId(
+  planId: string,
+  db: Firestore = getDb(),
+): Promise<PipelineBrief | null> {
+  const snap = await db
+    .collection(COLLECTION)
+    .where('promotedPlanId', '==', planId)
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  const doc = snap.docs[0]!;
+  return docToBrief(doc.id, doc.data() as Record<string, unknown>);
+}
+
+/**
  * List all briefs that share a batchId, oldest-first by insertion order.
  * Used by the batch-intake overview page to render the row list.
  */

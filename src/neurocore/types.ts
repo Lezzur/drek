@@ -78,3 +78,34 @@ export interface PublishedScriptSignal {
   selectedThumbnailComposition?: string;
   publishedAt: string;
 }
+
+/** ContentCatalog create payload — POST /v1/content-catalog. Server fills
+ *  id + createdAt + updatedAt. The endpoint is upsert-by-deliverableId,
+ *  so a re-publish for the same Deliverable updates in place rather
+ *  than duplicating. */
+export interface ContentCatalogCreatePayload {
+  deliverableId: string;
+  planId: string;
+  kind: 'long_form' | 'short_clip' | 'lead_magnet';
+  title: string;
+  youtubeUrl: string;
+  youtubeVideoId: string;
+  audienceProfileId: string;
+  primaryTechStackId: string;
+  supportingTechStackIds: string[];
+  topicTags: string[];
+  publishedAt: string;
+  sourceApp: 'drek';
+}
+
+/** ContentCatalog response shape — { profile, created }. We narrow the
+ *  profile to the bare fields the queue needs for logging; the full
+ *  shape lives on the Neurocore side. */
+export interface ContentCatalogResponse {
+  profile: {
+    id: string;
+    deliverableId: string;
+    publishedAt: string;
+  };
+  created: boolean;
+}

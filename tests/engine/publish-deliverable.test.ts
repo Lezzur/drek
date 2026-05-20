@@ -8,6 +8,7 @@ vi.mock('../../src/logger.js', () => ({
 import { createFakeFirestore, type FakeFirestore } from '../db/fake-firestore.js';
 import { createPlan } from '../../src/db/plans.js';
 import { createDeliverable } from '../../src/db/deliverables.js';
+import { createPipelineBrief } from '../../src/db/pipeline-briefs.js';
 import {
   publishDeliverable,
   InvalidYouTubeUrlError,
@@ -17,6 +18,11 @@ import { PlanningEngineError } from '../../src/engine/errors.js';
 import { NeurocoreError } from '../../src/neurocore/errors.js';
 import type { NeurocoreClient } from '../../src/neurocore/client.js';
 import type { PublishedScriptSignal } from '../../src/neurocore/types.js';
+import {
+  queueDepth,
+  _resetWriteQueueForTests,
+  _peekQueueForTests,
+} from '../../src/neurocore/write-queue.js';
 
 let fake: FakeFirestore;
 const asDb = () => fake as unknown as Firestore;
@@ -52,6 +58,7 @@ function makeFakeClient(): FakeClient {
 
 beforeEach(() => {
   fake = createFakeFirestore();
+  _resetWriteQueueForTests();
 });
 
 describe('YOUTUBE_URL_REGEX', () => {
@@ -219,5 +226,184 @@ describe('publishDeliverable', () => {
     });
     expect(fc.sent[0]!.kind).toBe('short_clip');
     expect(fc.sent[0]!.audienceProfileId).toBe('business_owner_shorts');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M28 — ContentCatalog enqueue on publish
+// ---------------------------------------------------------------------------
+
+describe('publishDeliverable — ContentCatalog enqueue (M28)', () => {
+  it('enqueues a ContentCatalog write when source brief has pinnedTechStack', async () => {
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'Ep 1',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'claude_code_build_along',
+      },
+      asDb(),
+    );
+    const del = await createDeliverable(
+      {
+        planId: plan.id,
+        kind: 'long_form',
+        audienceProfileId: 'developer_longform',
+        title: 'Ep 1',
+        status: 'exported',
+      },
+      asDb(),
+    );
+    // Brief promoted to this plan, with pinned tech stack.
+    const brief = await createPipelineBrief(
+      {
+        title: 'Source brief',
+        rawText: 'body',
+        stage: 'in_production',
+        promotedPlanId: plan.id,
+        pinnedTechStack: {
+          primary: 'tech_vapi',
+          supporting: ['tech_n8n'],
+          rationale: 'voice + automation',
+        },
+      },
+      asDb(),
+    );
+    // Reload from Firestore so the patch round-trips through the schema.
+    expect(brief.pinnedTechStack?.primary).toBe('tech_vapi');
+
+    const fc = makeFakeClient();
+    const result = await publishDeliverable(
+      del.id,
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      { db: asDb(), client: fc.client },
+    );
+
+    expect(result.contentCatalogEnqueued).toBe(true);
+    expect(queueDepth()).toBe(1);
+    const [entry] = _peekQueueForTests();
+    expect(entry?.body.deliverableId).toBe(del.id);
+    expect(entry?.body.primaryTechStackId).toBe('tech_vapi');
+    expect(entry?.body.supportingTechStackIds).toEqual(['tech_n8n']);
+    expect(entry?.body.youtubeVideoId).toBe('dQw4w9WgXcQ');
+    expect(entry?.body.sourceApp).toBe('drek');
+  });
+
+  it('skips enqueue when no brief was promoted to the plan', async () => {
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'Manual plan',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'claude_code_build_along',
+      },
+      asDb(),
+    );
+    const del = await createDeliverable(
+      {
+        planId: plan.id,
+        kind: 'long_form',
+        audienceProfileId: 'developer_longform',
+        title: 'Manual plan',
+        status: 'exported',
+      },
+      asDb(),
+    );
+    const fc = makeFakeClient();
+    const result = await publishDeliverable(
+      del.id,
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      { db: asDb(), client: fc.client },
+    );
+    expect(result.contentCatalogEnqueued).toBe(false);
+    expect(queueDepth()).toBe(0);
+  });
+
+  it('skips enqueue when the brief lacks pinnedTechStack (pre-M29 brief)', async () => {
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'Older brief',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'claude_code_build_along',
+      },
+      asDb(),
+    );
+    const del = await createDeliverable(
+      {
+        planId: plan.id,
+        kind: 'long_form',
+        audienceProfileId: 'developer_longform',
+        title: 'Older brief',
+        status: 'exported',
+      },
+      asDb(),
+    );
+    await createPipelineBrief(
+      {
+        title: 'Older brief',
+        rawText: 'body',
+        stage: 'in_production',
+        promotedPlanId: plan.id,
+        // No pinnedTechStack — pre-M29 brief.
+      },
+      asDb(),
+    );
+
+    const fc = makeFakeClient();
+    const result = await publishDeliverable(
+      del.id,
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      { db: asDb(), client: fc.client },
+    );
+    expect(result.contentCatalogEnqueued).toBe(false);
+    expect(queueDepth()).toBe(0);
+  });
+
+  it('skips enqueue when youtubeUrl passes loose regex but fails strict id extraction', async () => {
+    const plan = await createPlan(
+      {
+        type: 'youtube_advanced',
+        title: 'Edge URL',
+        targetRuntimeSeconds: 1800,
+        formatProfileId: 'claude_code_build_along',
+      },
+      asDb(),
+    );
+    const del = await createDeliverable(
+      {
+        planId: plan.id,
+        kind: 'long_form',
+        audienceProfileId: 'developer_longform',
+        title: 'Edge URL',
+        status: 'exported',
+      },
+      asDb(),
+    );
+    await createPipelineBrief(
+      {
+        title: 'Edge URL brief',
+        rawText: 'body',
+        stage: 'in_production',
+        promotedPlanId: plan.id,
+        pinnedTechStack: {
+          primary: 'tech_vapi',
+          supporting: [],
+          rationale: 'r',
+        },
+      },
+      asDb(),
+    );
+
+    const fc = makeFakeClient();
+    // Passes loose regex (youtube.com/abc), but strict extractor needs
+    // watch?v=, shorts/, or youtu.be/ + an 11-char id.
+    const result = await publishDeliverable(
+      del.id,
+      'https://www.youtube.com/channel/something',
+      { db: asDb(), client: fc.client },
+    );
+    expect(result.contentCatalogEnqueued).toBe(false);
+    expect(queueDepth()).toBe(0);
   });
 });

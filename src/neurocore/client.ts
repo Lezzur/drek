@@ -3,6 +3,8 @@ import { logger } from '../logger.js';
 import { NeurocoreError, isRetryable, type NeurocoreErrorCode } from './errors.js';
 import type {
   ApprovedScriptSignal,
+  ContentCatalogCreatePayload,
+  ContentCatalogResponse,
   MemoryContextResponse,
   PendingListing,
   PendingListingsResponse,
@@ -200,6 +202,28 @@ export class NeurocoreClient {
         occurredAt: new Date().toISOString(),
       },
       { idempotencyKey: `drek-script-published-${payload.deliverableId}` },
+    );
+  }
+
+  /**
+   * Create-or-update a ContentCatalog row on Neurocore. The server
+   * upserts by deliverableId, so a re-publish for the same Deliverable
+   * is safe — the same row updates in place. Idempotency-key here is the
+   * 24h short-window guard against duplicate POSTs from the write queue's
+   * retry path (the server-side deliverableId index is the long-window
+   * guard).
+   *
+   * This is called via the persistent write queue, not directly. See
+   * src/neurocore/write-queue.ts.
+   */
+  async createContentCatalog(
+    payload: ContentCatalogCreatePayload,
+  ): Promise<ContentCatalogResponse> {
+    return this.requestJson<ContentCatalogResponse>(
+      'POST',
+      '/v1/content-catalog',
+      payload,
+      { idempotencyKey: `drek-content-catalog-${payload.deliverableId}` },
     );
   }
 

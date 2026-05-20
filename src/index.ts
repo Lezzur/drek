@@ -6,6 +6,7 @@ import { getDb } from './db/firestore.js';
 import { startScheduler } from './lib/scheduler.js';
 import { refreshModelCatalog } from './models/catalog.js';
 import { makePollingJob } from './polling/service.js';
+import { initializeWriteQueue } from './neurocore/write-queue.js';
 
 const env = getEnv();
 const app = createApp();
@@ -55,6 +56,14 @@ serve(
           logger.warn({ err }, 'startup model refresh failed'),
         );
       }, 30_000);
+
+      // Recover the Neurocore write queue from disk (if WORKSPACE_ROOT is set)
+      // and start the 30s drain worker. Best-effort: a recovery failure
+      // shouldn't take down the server, just disables durable retries until
+      // the next boot.
+      void initializeWriteQueue().catch((err) =>
+        logger.warn({ err: (err as Error).message }, 'neurocore-write-queue init failed'),
+      );
     }
   },
 );

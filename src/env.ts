@@ -74,6 +74,21 @@ const envSchema = z.object({
   // configuring it — the workspace module surfaces a degraded health check
   // when unset rather than crashing on startup.
   WORKSPACE_ROOT: z.string().optional(),
+
+  // --- v2.1 YouTube client (M30) --------------------------------------------
+  // OAuth credentials for YouTube Data + Analytics APIs. All four are
+  // optional in env so DREK boots without YouTube wired up; the client
+  // surfaces NOT_CONFIGURED on first call when any are missing.
+  YOUTUBE_CLIENT_ID: z.string().optional(),
+  YOUTUBE_CLIENT_SECRET: z.string().optional(),
+  YOUTUBE_REFRESH_TOKEN: z.string().optional(),
+  YOUTUBE_CHANNEL_ID: z.string().optional(),
+  // Per-process Data API quota cap. Default matches the Google free-tier
+  // 10K units/day; lower this if you're sharing a quota with other apps.
+  YOUTUBE_DAILY_QUOTA: z.coerce.number().int().positive().default(10_000),
+  // HTTP timeout for individual YouTube API calls. Most respond in <1s;
+  // 30s gives slow analytics queries headroom without holding workers.
+  YOUTUBE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

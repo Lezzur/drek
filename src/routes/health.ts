@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db/firestore.js';
 import { logger } from '../logger.js';
 import { queueDepth, deadLetterCount } from '../neurocore/write-queue.js';
+import { getYouTubeClient } from '../youtube/client.js';
 
 const app = new Hono();
 
@@ -34,6 +35,24 @@ app.get('/healthz', async (c) => {
   const writeQueueDepth = queueDepth();
   const deadLetters = await deadLetterCount();
 
+  // YouTube client — soft signal. Not-configured is acceptable in dev
+  // and never flips to 503; quota over 80% surfaces as 'warn'.
+  let youtubeConfigured = false;
+  let youtubeQuotaUtil = 0;
+  try {
+    const yt = getYouTubeClient();
+    youtubeConfigured = yt.isConfigured();
+    youtubeQuotaUtil = yt.quotaSnapshot().utilization;
+  } catch {
+    // Constructor would only throw on a real env validation failure
+    // — treat as 'not configured' for health-check purposes.
+  }
+  const youtubeStatus: 'ok' | 'warn' | 'not_configured' = !youtubeConfigured
+    ? 'not_configured'
+    : youtubeQuotaUtil >= 0.8
+      ? 'warn'
+      : 'ok';
+
   const allOk = firestore === 'ok';
   const body = {
     status: allOk ? 'ok' : 'degraded',
@@ -45,6 +64,8 @@ app.get('/healthz', async (c) => {
       neurocoreWriteQueue: deadLetters > 0 ? ('warn' as const) : ('ok' as const),
       neurocoreWriteQueueDepth: writeQueueDepth,
       neurocoreDeadLetterCount: deadLetters,
+      youtube: youtubeStatus,
+      youtubeQuotaUtilization: Math.round(youtubeQuotaUtil * 100) / 100,
     },
   };
 

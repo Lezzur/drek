@@ -18,7 +18,11 @@ import { IntakeError } from './errors.js';
  */
 
 const STEP_NAME = 'score-brief';
-const LLM_TIMEOUT_MS = 30_000;
+// Real Upwork briefs are dense — 6-8KB of marketing fluff around the actual
+// scope. Observed CLI invocations: 22-30s on the happy path, 45-60s when
+// the model needs the retry. 60s gives us headroom without dragging out
+// batch UX. Tunable via opts.timeoutMs at call sites.
+const LLM_TIMEOUT_MS = 60_000;
 const MAX_BRIEF_TEXT = 50_000; // hard cap (also enforced by schema on write)
 
 /** What the LLM returns. We compute the aggregate server-side from the

@@ -198,6 +198,67 @@ function buildPrompt(title: string, company: string | null, rawText: string): st
   return `${SYSTEM_PROMPT}\n\n${header}${rawText}`;
 }
 
+/**
+ * Score arbitrary brief text WITHOUT touching Firestore. Used by the
+ * Brief Transformer (M29) to re-score the transformed brief in-process.
+ *
+ * Shape-coupled to `scoreBriefViaLLM` — same prompt, same parse, same
+ * retry-once policy. Returns the BriefScore only; no rationale, no
+ * persistence.
+ */
+export async function scoreBriefTextDirect(
+  input: { title: string; company: string | null; text: string },
+  opts: { provider: LLMProvider; timeoutMs?: number },
+): Promise<BriefScore> {
+  const provider = opts.provider;
+  const timeoutMs = opts.timeoutMs ?? LLM_TIMEOUT_MS;
+  const text = input.text.slice(0, MAX_BRIEF_TEXT);
+  const basePrompt = buildPrompt(input.title, input.company, text);
+
+  let parsed: z.infer<typeof llmScoreSchema>;
+  try {
+    const raw = await invokeLLM(provider, basePrompt, timeoutMs);
+    const first = tryParseScore(raw);
+    if (first.ok) {
+      parsed = first.value;
+    } else {
+      const stricter = `${basePrompt}\n\nIMPORTANT: Your previous response did not parse as the required JSON object. Respond with ONLY the JSON — no fences, no prose. Start with { and end with }.`;
+      const raw2 = await invokeLLM(provider, stricter, timeoutMs);
+      const second = tryParseScore(raw2);
+      if (!second.ok) {
+        throw new IntakeError(
+          'INVALID_OUTPUT',
+          `LLM scoring output did not parse after retry: ${second.reason}`,
+          { detail: second.detail },
+        );
+      }
+      parsed = second.value;
+    }
+  } catch (err) {
+    if (err instanceof IntakeError) throw err;
+    if (err instanceof LLMProviderError) {
+      throw new IntakeError(
+        'LLM_FAILED',
+        `LLM call failed: ${err.message}`,
+        { detail: { code: err.code } },
+      );
+    }
+    throw err;
+  }
+
+  const aggregate = roundToOneDecimal(
+    (parsed.visualOutcome + parsed.storyPotential + parsed.scopeFit + parsed.audienceMatch) /
+      4,
+  );
+  return briefScoreSchema.parse({
+    visualOutcome: parsed.visualOutcome,
+    storyPotential: parsed.storyPotential,
+    scopeFit: parsed.scopeFit,
+    audienceMatch: parsed.audienceMatch,
+    aggregate,
+  });
+}
+
 interface ParseOk {
   ok: true;
   value: z.infer<typeof llmScoreSchema>;

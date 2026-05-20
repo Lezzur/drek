@@ -3,6 +3,7 @@ import { Layout, type LayoutProps } from './layout.js';
 import type { PipelineBrief, BriefStage, BriefScore } from '../db/schemas.js';
 import type { FormatProfile } from '../engine/format-profiles/index.js';
 import type { AudienceProfile } from '../neurocore/audience-profiles.js';
+import { isTransformable } from '../engine/transform-brief.js';
 
 export interface BriefDetailPageProps {
   brief: PipelineBrief;
@@ -166,7 +167,160 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
         <span class="muted htmx-indicator" style="font-size:13px;">Scoring… (~15-30s)</span>
       </div>
 
+      {isTransformable(score) && !brief.transformedBriefText ? (
+        <div
+          style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-soft);"
+        >
+          <div style="font-size:13px; color:var(--ink-2); line-height:1.5; margin-bottom:8px;">
+            Strong technical fit ({score.scopeFit}/{score.audienceMatch}) but
+            weak narrative axes — this brief is a transformer candidate.
+          </div>
+          <button
+            class="btn small accent"
+            type="button"
+            hx-post={`/intake/${brief.id}/transform`}
+            hx-target="body"
+            hx-swap="outerHTML"
+            hx-confirm="Transform this brief? The LLM will rewrite it with a pinned tech stack and re-score it. ~45-90s."
+          >
+            Transform brief
+          </button>
+          <span class="muted htmx-indicator" style="margin-left:10px; font-size:13px;">Transforming… (~45-90s)</span>
+        </div>
+      ) : null}
+
       <script dangerouslySetInnerHTML={{ __html: manualEditScript }} />
+    </div>
+  );
+};
+
+function deltaLabel(delta: number): string {
+  if (delta === 0) return '±0';
+  return delta > 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1);
+}
+
+function deltaColor(delta: number, axis: 'technical' | 'narrative'): string {
+  if (axis === 'technical') {
+    // Technical axes (scopeFit, audienceMatch) should be preserved.
+    // Any movement is suspicious; large movement is alarming.
+    if (Math.abs(delta) > 0.5) return 'var(--danger)';
+    if (Math.abs(delta) > 0) return 'var(--amber-fg)';
+    return 'var(--ink-3)';
+  }
+  // Narrative axes (visualOutcome, storyPotential) — improvement is the goal.
+  if (delta >= 1.0) return 'var(--green-fg)';
+  if (delta > 0) return 'var(--amber-fg)';
+  return 'var(--danger)';
+}
+
+const ScoreCompareRow: FC<{
+  label: string;
+  before: number;
+  after: number;
+  axis: 'technical' | 'narrative';
+}> = ({ label, before, after, axis }) => {
+  const delta = Math.round((after - before) * 10) / 10;
+  const color = deltaColor(delta, axis);
+  return (
+    <div class="row" style="gap:12px; padding:6px 0; border-bottom:1px solid var(--border-soft); font-size:14px;">
+      <span style="flex:1; color:var(--ink-2);">{label}</span>
+      <span style="color:var(--ink-3); font-variant-numeric:tabular-nums;">{before}</span>
+      <span style="color:var(--ink-3);">→</span>
+      <span style="font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; min-width:20px; text-align:right;">{after}</span>
+      <span style={`min-width:48px; text-align:right; font-weight:600; font-variant-numeric:tabular-nums; color:${color};`}>
+        {deltaLabel(delta)}
+      </span>
+    </div>
+  );
+};
+
+const TransformPanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
+  if (!brief.transformedBriefText || !brief.transformedScore || !brief.pinnedTechStack || !brief.score) {
+    return null;
+  }
+  const before = brief.score;
+  const after = brief.transformedScore;
+  const stack = brief.pinnedTechStack;
+  const techDrift =
+    Math.abs(after.scopeFit - before.scopeFit) > 0.5 ||
+    Math.abs(after.audienceMatch - before.audienceMatch) > 0.5;
+
+  return (
+    <div class="card" style="margin-bottom:16px;">
+      <div class="row" style="margin-bottom:12px; align-items:center;">
+        <h3 class="section-label" style="margin:0;">Transformed brief</h3>
+        <span class="spacer" />
+        <span
+          style={`font-size:22px; font-weight:700; color:${scoreColor(after.aggregate)}; font-variant-numeric:tabular-nums;`}
+        >
+          {after.aggregate.toFixed(1)}
+        </span>
+        <span class="muted" style="font-size:12px;">&nbsp;/ 5</span>
+      </div>
+
+      {techDrift ? (
+        <div class="flash warn" style="margin-bottom:12px; font-size:13px;">
+          Technical-axis drift &gt; 0.5 detected — the transformer may have
+          changed what the project IS, not just how it's framed. Review the
+          transformed text carefully before promoting.
+        </div>
+      ) : null}
+
+      <div style="margin-bottom:14px;">
+        <div class="field-label" style="margin-bottom:6px;">Score comparison</div>
+        <ScoreCompareRow label="Visual outcome" before={before.visualOutcome} after={after.visualOutcome} axis="narrative" />
+        <ScoreCompareRow label="Story potential" before={before.storyPotential} after={after.storyPotential} axis="narrative" />
+        <ScoreCompareRow label="Scope fit" before={before.scopeFit} after={after.scopeFit} axis="technical" />
+        <ScoreCompareRow label="Audience match" before={before.audienceMatch} after={after.audienceMatch} axis="technical" />
+        <ScoreCompareRow label="Aggregate" before={before.aggregate} after={after.aggregate} axis="narrative" />
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <div class="field-label" style="margin-bottom:6px;">Pinned tech stack</div>
+        <div style="font-size:14px; color:var(--ink); line-height:1.5;">
+          <div>
+            <strong>Primary:</strong>{' '}
+            <code style="font-size:13px;">{stack.primary}</code>
+          </div>
+          {stack.supporting.length > 0 ? (
+            <div style="margin-top:4px;">
+              <strong>Supporting:</strong>{' '}
+              {stack.supporting.map((id, i) => (
+                <span>
+                  <code style="font-size:13px;">{id}</code>
+                  {i < stack.supporting.length - 1 ? ', ' : ''}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div style="margin-top:8px; color:var(--ink-2); font-size:13px; line-height:1.6;">
+            {stack.rationale}
+          </div>
+        </div>
+      </div>
+
+      <details>
+        <summary style="cursor:pointer; font-size:13px; color:var(--ink-3); padding:8px 0;">
+          Transformed brief text ({brief.transformedBriefText.length.toLocaleString()} chars) ▾
+        </summary>
+        <div style="border:1px solid var(--border); border-radius:8px; padding:16px; background:var(--surface); margin-top:4px;">
+          <pre style="white-space:pre-wrap; font-family:inherit; font-size:13px; color:var(--ink-2); line-height:1.6; margin:0; overflow-wrap:break-word;">{brief.transformedBriefText}</pre>
+        </div>
+      </details>
+
+      <div class="row" style="margin-top:14px; gap:8px;">
+        <button
+          class="btn small secondary"
+          type="button"
+          hx-post={`/intake/${brief.id}/transform`}
+          hx-target="body"
+          hx-swap="outerHTML"
+          hx-confirm="Re-transform this brief? The current transformed text and tech-stack pick will be overwritten."
+        >
+          Re-transform
+        </button>
+        <span class="muted htmx-indicator" style="font-size:13px;">Transforming… (~45-90s)</span>
+      </div>
     </div>
   );
 };
@@ -295,6 +449,7 @@ export const BriefDetailPage: FC<BriefDetailPageProps> = ({
 
         <div>
           <ScorePanel brief={brief} />
+          <TransformPanel brief={brief} />
           <PromoteForm
             brief={brief}
             formatProfiles={formatProfiles}

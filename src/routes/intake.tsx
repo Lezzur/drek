@@ -15,6 +15,7 @@ import {
   type BulkBriefAction,
 } from '../intake/service.js';
 import { scoreBriefViaLLM } from '../intake/scoring.js';
+import { transformBrief } from '../engine/transform-brief.js';
 import { IntakeError } from '../intake/errors.js';
 import { listFormatProfiles } from '../engine/format-profiles/index.js';
 import { getAudienceProfileClient } from '../neurocore/audience-profiles.js';
@@ -376,6 +377,8 @@ app.get('/intake/:briefId', async (c) => {
     const flash =
       flashParam === 'scored'
         ? { type: 'ok' as const, message: 'Brief scored successfully.' }
+        : flashParam === 'transformed'
+        ? { type: 'ok' as const, message: 'Brief transformed — review the before/after below.' }
         : null;
 
     return c.html(
@@ -419,6 +422,43 @@ app.post('/intake/:briefId/score', async (c) => {
       }
     }
     logger.error({ briefId, err: (err as Error).message }, 'intake: scoring failed');
+    throw err;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /intake/:briefId/transform — fire the Brief Transformer (Call 11.5)
+// ---------------------------------------------------------------------------
+
+app.post('/intake/:briefId/transform', async (c) => {
+  const briefId = c.req.param('briefId');
+  try {
+    const result = await transformBrief(briefId);
+    logger.info(
+      {
+        briefId,
+        pinnedTechStack: result.brief.pinnedTechStack?.primary,
+        drift: result.drift,
+      },
+      'intake.transform: brief transformed',
+    );
+    return c.redirect(`/intake/${briefId}?flash=transformed`, 302);
+  } catch (err) {
+    if (err instanceof IntakeError) {
+      if (err.code === 'BRIEF_NOT_FOUND') {
+        return c.json({ error: { code: err.code, message: err.message } }, 404);
+      }
+      if (
+        err.code === 'BRIEF_MISSING_SCORE' ||
+        err.code === 'INVALID_OUTPUT'
+      ) {
+        return c.json({ error: { code: err.code, message: err.message } }, 400);
+      }
+      if (err.code === 'LLM_FAILED' || err.code === 'PERSIST_FAILED') {
+        return c.json({ error: { code: err.code, message: err.message } }, 500);
+      }
+    }
+    logger.error({ briefId, err: (err as Error).message }, 'intake.transform: unexpected');
     throw err;
   }
 });

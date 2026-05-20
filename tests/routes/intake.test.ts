@@ -38,6 +38,17 @@ vi.mock('../../src/intake/scoring.js', () => ({
   scoreBriefViaLLM: (...args: unknown[]) => mockScoreBriefViaLLM(...args),
 }));
 
+const mockTransformBrief = vi.fn();
+vi.mock('../../src/engine/transform-brief.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../src/engine/transform-brief.js')
+  >('../../src/engine/transform-brief.js');
+  return {
+    ...actual,
+    transformBrief: (...args: unknown[]) => mockTransformBrief(...args),
+  };
+});
+
 vi.mock('../../src/neurocore/audience-profiles.js', async () => {
   const actual = await vi.importActual<
     typeof import('../../src/neurocore/audience-profiles.js')
@@ -85,6 +96,9 @@ function fakeBrief(overrides: Partial<PipelineBrief> = {}): PipelineBrief {
     stage: 'candidate',
     promotedPlanId: null,
     batchId: null,
+    transformedBriefText: null,
+    transformedScore: null,
+    pinnedTechStack: null,
     createdAt: new Date('2026-05-01T00:00:00Z'),
     updatedAt: new Date('2026-05-01T00:00:00Z'),
     ...overrides,
@@ -660,5 +674,97 @@ describe('DELETE /intake/:briefId', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { deleted: boolean };
     expect(body.deleted).toBe(false);
+  });
+});
+
+// ===========================================================================
+// POST /intake/:id/transform (M29 — Brief Transformer)
+// ===========================================================================
+
+describe('POST /intake/:id/transform', () => {
+  const transformedBrief = fakeBrief({
+    score: fakeScore(),
+    transformedBriefText: 'rewritten brief body',
+    transformedScore: { ...fakeScore(), visualOutcome: 5, storyPotential: 5, aggregate: 4.5 },
+    pinnedTechStack: {
+      primary: 'tech_vapi',
+      supporting: ['tech_n8n'],
+      rationale: 'voice surface + downstream automation',
+    },
+  });
+
+  beforeEach(() => {
+    mockGetBrief.mockResolvedValue(transformedBrief);
+    mockListBriefs.mockResolvedValue([]);
+  });
+
+  it('redirects to detail page with flash=transformed on success', async () => {
+    mockTransformBrief.mockResolvedValue({
+      brief: transformedBrief,
+      retried: false,
+      durationMs: 60_000,
+      drift: { scopeFitDelta: 0, audienceMatchDelta: 0, visualOutcomeDelta: 2, storyPotentialDelta: 2, flagged: false },
+    });
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/transform', { method: 'POST' });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('/intake/brief_abc');
+    expect(res.headers.get('location')).toContain('flash=transformed');
+    expect(mockTransformBrief).toHaveBeenCalledWith('brief_abc');
+  });
+
+  it('returns 404 when brief not found', async () => {
+    mockTransformBrief.mockRejectedValue(
+      new IntakeError('BRIEF_NOT_FOUND', 'not found', { briefId: 'missing' }),
+    );
+    const app = createApp();
+    const res = await app.request('/intake/missing/transform', { method: 'POST' });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('BRIEF_NOT_FOUND');
+  });
+
+  it('returns 400 when brief has no score', async () => {
+    mockTransformBrief.mockRejectedValue(
+      new IntakeError('BRIEF_MISSING_SCORE', 'score required first', { briefId: 'brief_abc' }),
+    );
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/transform', { method: 'POST' });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('BRIEF_MISSING_SCORE');
+  });
+
+  it('returns 400 when brief is not transformable (INVALID_OUTPUT from gate)', async () => {
+    mockTransformBrief.mockRejectedValue(
+      new IntakeError('INVALID_OUTPUT', 'brief is not transformable', { briefId: 'brief_abc' }),
+    );
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/transform', { method: 'POST' });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_OUTPUT');
+  });
+
+  it('returns 500 when the LLM call fails', async () => {
+    mockTransformBrief.mockRejectedValue(
+      new IntakeError('LLM_FAILED', 'timeout', { briefId: 'brief_abc' }),
+    );
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/transform', { method: 'POST' });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('LLM_FAILED');
+  });
+
+  it('returns 500 when Firestore persist fails', async () => {
+    mockTransformBrief.mockRejectedValue(
+      new IntakeError('PERSIST_FAILED', 'write failed', { briefId: 'brief_abc' }),
+    );
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/transform', { method: 'POST' });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('PERSIST_FAILED');
   });
 });

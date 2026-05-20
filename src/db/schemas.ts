@@ -481,6 +481,19 @@ export type BriefScore = z.infer<typeof briefScoreSchema>;
 
 const MAX_BRIEF_RAW_TEXT_BYTES = 50_000;
 
+/**
+ * v2.1 Brief Transformer (M29) — captures the LLM's tech-stack pick along
+ * with a short rationale. `primary` and every `supporting` id must exist
+ * in Neurocore's tech_stack_profiles registry; the transformer validates
+ * this before persisting.
+ */
+export const pinnedTechStackSchema = z.object({
+  primary: z.string().min(1),
+  supporting: z.array(z.string().min(1)).max(5).default([]),
+  rationale: z.string().min(1).max(800),
+});
+export type PinnedTechStack = z.infer<typeof pinnedTechStackSchema>;
+
 export const pipelineBriefSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1).max(300),
@@ -494,6 +507,14 @@ export const pipelineBriefSchema = z.object({
   /** v2.1: group briefs submitted in the same batch-intake form. Null for
    *  briefs created via the single-brief intake or pre-v2.1 docs. */
   batchId: z.string().nullable().default(null),
+  /** v2.1 M29: post-Transformer rewritten brief text. Null until Rick
+   *  clicks Transform on a brief that passes the transformability gate. */
+  transformedBriefText: z.string().max(MAX_BRIEF_RAW_TEXT_BYTES).nullable().default(null),
+  /** v2.1 M29: score of the transformed brief, re-run through Call 11
+   *  immediately after transformation. Compared with `score` for drift. */
+  transformedScore: briefScoreSchema.nullable().default(null),
+  /** v2.1 M29: tech stack the transformer committed the brief to. */
+  pinnedTechStack: pinnedTechStackSchema.nullable().default(null),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -509,6 +530,9 @@ export const pipelineBriefCreateSchema = pipelineBriefSchema
     company: true,
     sourceUrl: true,
     batchId: true,
+    transformedBriefText: true,
+    transformedScore: true,
+    pinnedTechStack: true,
   });
 export type PipelineBriefCreate = z.infer<typeof pipelineBriefCreateSchema>;
 

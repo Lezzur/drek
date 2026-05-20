@@ -32,6 +32,14 @@
         { "fieldPath": "planId", "order": "ASCENDING" },
         { "fieldPath": "receivedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "pipeline_briefs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "batchId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

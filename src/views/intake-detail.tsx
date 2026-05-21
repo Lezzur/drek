@@ -74,11 +74,12 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
             hx-post={`/intake/${brief.id}/score`}
             hx-target="body"
             hx-swap="outerHTML"
-            hx-confirm="Run LLM scoring on this brief? This takes 15-30 seconds."
+            hx-indicator="#score-indicator"
+            hx-disabled-elt="this"
           >
             Score with LLM
           </button>
-          <span class="muted htmx-indicator" id="score-indicator" style="margin-left:10px; font-size:13px;">Scoring… (~15-30s)</span>
+          <span class="score-spinner htmx-indicator" id="score-indicator">Scoring…</span>
         </div>
       </div>
     );
@@ -160,11 +161,12 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
           hx-post={`/intake/${brief.id}/score`}
           hx-target="body"
           hx-swap="outerHTML"
-          hx-confirm="Re-score this brief with the LLM? This will overwrite the current scores."
+          hx-indicator="#rescore-indicator"
+          hx-disabled-elt="this"
         >
           Re-score
         </button>
-        <span class="muted htmx-indicator" style="font-size:13px;">Scoring… (~15-30s)</span>
+        <span class="score-spinner htmx-indicator" id="rescore-indicator">Scoring…</span>
       </div>
 
       {isTransformable(score) && !brief.transformedBuildPlan ? (

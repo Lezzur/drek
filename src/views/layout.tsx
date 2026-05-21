@@ -346,6 +346,28 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
 .htmx-request.htmx-indicator { display: inline; }
 button.btn.htmx-request { opacity: 0.55; cursor: wait; pointer-events: none; }
 @keyframes drek-spin { to { transform: rotate(360deg); } }
+/* Score / re-score spinner — replaces the verbose "(~15-30s)" inline hint
+   with a compact animated dot. Wired to btn[hx-indicator=#score-indicator]
+   and btn[hx-indicator=#rescore-indicator] via the htmx-indicator class. */
+.score-spinner {
+  display: none;
+  margin-left: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.score-spinner::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border: 1.5px solid var(--ink-3);
+  border-top-color: var(--accent, var(--ink));
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: drek-spin 0.8s linear infinite;
+}
+.htmx-request.score-spinner { display: inline-flex; align-items: center; }
 .pipeline-indicator {
   display: none;
   align-items: center;

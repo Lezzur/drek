@@ -145,9 +145,14 @@ describe('IntakeListPage', () => {
     expect(html).toContain('Add batch');
   });
 
-  // ---- M35 transformable badge ----
+  // ---- M35 transformable column (yes / no / em-dash) ----
 
-  it('renders ✓ Transformable badge when score passes the gate', () => {
+  it('renders the Transformable column header', () => {
+    const html = toHtml(IntakeListPage({ briefs: [fakeBrief()], queueDepth: 5 }));
+    expect(html).toContain('>Transformable<');
+  });
+
+  it('renders "yes" when score passes the gate', () => {
     const passing = fakeBrief({
       id: 'pass',
       score: {
@@ -159,11 +164,10 @@ describe('IntakeListPage', () => {
       },
     });
     const html = toHtml(IntakeListPage({ briefs: [passing], queueDepth: 5 }));
-    expect(html).toContain('✓ Transformable');
-    expect(html).not.toContain('Blocked:');
+    expect(html).toMatch(/>yes</);
   });
 
-  it('renders Blocked: scope badge when scopeFit < 2.0', () => {
+  it('renders "no" when scopeFit < 2.0', () => {
     const blocked = fakeBrief({
       id: 'blocked-scope',
       score: {
@@ -175,10 +179,12 @@ describe('IntakeListPage', () => {
       },
     });
     const html = toHtml(IntakeListPage({ briefs: [blocked], queueDepth: 5 }));
-    expect(html).toContain('Blocked: scope');
+    expect(html).toMatch(/>no</);
+    // Hover-title spells out which axis is the problem.
+    expect(html).toContain('Blocked by transformer gate: scope');
   });
 
-  it('renders Blocked: audience badge when audienceMatch < 3.0', () => {
+  it('renders "no" when audienceMatch < 3.0', () => {
     const blocked = fakeBrief({
       id: 'blocked-audience',
       score: {
@@ -190,10 +196,11 @@ describe('IntakeListPage', () => {
       },
     });
     const html = toHtml(IntakeListPage({ briefs: [blocked], queueDepth: 5 }));
-    expect(html).toContain('Blocked: audience');
+    expect(html).toMatch(/>no</);
+    expect(html).toContain('Blocked by transformer gate: audience');
   });
 
-  it('renders Blocked: scope, audience when both axes fail', () => {
+  it('hover-title lists both axes when both fail', () => {
     const blocked = fakeBrief({
       id: 'blocked-both',
       score: {
@@ -205,10 +212,10 @@ describe('IntakeListPage', () => {
       },
     });
     const html = toHtml(IntakeListPage({ briefs: [blocked], queueDepth: 5 }));
-    expect(html).toContain('Blocked: scope, audience');
+    expect(html).toContain('Blocked by transformer gate: scope, audience');
   });
 
-  it('M35 4/4/2/5 brief gets the ✓ Transformable badge (multi-day series allowed)', () => {
+  it('renders "yes" for the 4/4/2/5 multi-day-series brief (M35 gate)', () => {
     const ricks = fakeBrief({
       id: 'ricks-brief',
       score: {
@@ -220,14 +227,7 @@ describe('IntakeListPage', () => {
       },
     });
     const html = toHtml(IntakeListPage({ briefs: [ricks], queueDepth: 5 }));
-    expect(html).toContain('✓ Transformable');
-  });
-
-  it('does not render any transformable badge for unscored briefs', () => {
-    const unscored = fakeBrief({ id: 'unscored', score: null });
-    const html = toHtml(IntakeListPage({ briefs: [unscored], queueDepth: 5 }));
-    expect(html).not.toContain('Transformable');
-    expect(html).not.toContain('Blocked:');
+    expect(html).toMatch(/>yes</);
   });
 
   // ---- M35 score-overrides counter + threshold banner ----

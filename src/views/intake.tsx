@@ -99,39 +99,36 @@ const ScoreBadge: FC<{ score: BriefScore }> = ({ score }) => {
 };
 
 /**
- * M35: at-a-glance transform-eligibility pill. Renders under the score
- * badge in the intake list so Rick can spot which briefs will give him
- * the Transform button before clicking in.
- *
- *   ok          → "✓ Transformable" (green)
- *   one failure → "Blocked: scope" / "Blocked: audience" (amber)
- *   two failures→ "Blocked: scope, audience" (amber)
- *
- * Hover-title spells out the gate rule so Rick doesn't have to remember it.
+ * M35: dedicated "Transformable" column on the intake list. Renders a
+ * plain "yes" / "no" with an em-dash for unscored briefs. On hover, the
+ * "no" cell spells out which axes failed the gate.
  */
 const AXIS_LABEL: Record<'scopeFit' | 'audienceMatch', string> = {
   scopeFit: 'scope',
   audienceMatch: 'audience',
 };
-const TransformableBadge: FC<{ score: BriefScore }> = ({ score }) => {
+const TransformableCell: FC<{ score: BriefScore | null }> = ({ score }) => {
+  if (!score) {
+    return <span class="muted" style="font-size:13px; font-style:italic;">—</span>;
+  }
   const { ok, failedAxes } = transformableReason(score);
   if (ok) {
     return (
       <span
         title="Passes transformer gate (scopeFit >= 2.0 AND audienceMatch >= 3.0)"
-        style="display:inline-block;margin-top:4px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:var(--green-bg, rgba(16,185,129,0.12));color:var(--green-fg);text-transform:uppercase;letter-spacing:0.04em;"
+        style="font-size:13px; font-weight:600; color:var(--green-fg);"
       >
-        ✓ Transformable
+        yes
       </span>
     );
   }
   const labels = failedAxes.map((a) => AXIS_LABEL[a]).join(', ');
   return (
     <span
-      title="Blocked by transformer gate (requires scopeFit >= 2.0 AND audienceMatch >= 3.0). Edit the score if the LLM rated it wrong."
-      style="display:inline-block;margin-top:4px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:var(--amber-bg, rgba(245,158,11,0.12));color:var(--amber-fg);text-transform:uppercase;letter-spacing:0.04em;"
+      title={`Blocked by transformer gate: ${labels}. Requires scopeFit >= 2.0 AND audienceMatch >= 3.0. Edit the score if the LLM rated it wrong.`}
+      style="font-size:13px; font-weight:600; color:var(--ink-3);"
     >
-      Blocked: {labels}
+      no
     </span>
   );
 };
@@ -162,7 +159,7 @@ const StagePills: FC<{ currentStage?: BriefStage }> = ({ currentStage }) => {
 };
 
 const COL_GRID =
-  'grid-template-columns: 32px 1fr 80px 110px auto; gap:12px; align-items:center;';
+  'grid-template-columns: 32px 1fr 80px 110px 110px auto; gap:12px; align-items:center;';
 
 const BriefRow: FC<{ brief: PipelineBrief }> = ({ brief }) => {
   const stale = isStale(brief);
@@ -203,15 +200,14 @@ const BriefRow: FC<{ brief: PipelineBrief }> = ({ brief }) => {
 
       <div style="text-align:center;">
         {brief.score ? (
-          <>
-            <ScoreBadge score={brief.score} />
-            <div>
-              <TransformableBadge score={brief.score} />
-            </div>
-          </>
+          <ScoreBadge score={brief.score} />
         ) : (
           <span class="muted" style="font-size:12px; font-style:italic;">—</span>
         )}
+      </div>
+
+      <div style="text-align:center;">
+        <TransformableCell score={brief.score} />
       </div>
 
       <div style="text-align:center;">
@@ -266,6 +262,7 @@ const BriefListHeader: FC = () => {
       <div />
       <div>Brief</div>
       <div style="text-align:center;">Score</div>
+      <div style="text-align:center;">Transformable</div>
       <div style="text-align:center;">Status</div>
       <div style="text-align:right;">Actions</div>
     </div>

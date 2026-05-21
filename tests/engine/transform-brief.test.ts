@@ -81,7 +81,7 @@ const SAMPLE_TECH_STACKS: TechStackProfile[] = [
     category: 'workflow_automation',
     ecosystem: ['workflow', 'automation'],
     popularityTier: 'mainstream',
-    filmableNotes: 'node graph builds visually, real-time execution traces are good b-roll',
+    filmableNotes: 'node graph builds visually',
     exampleUseCases: ['workflow automation', 'API orchestration', 'webhook routing'],
     status: 'active',
     createdAt: '2026-05-18T14:00:00.000Z',
@@ -89,15 +89,7 @@ const SAMPLE_TECH_STACKS: TechStackProfile[] = [
   },
 ];
 
-const TRANSFORMABLE_SCORE: BriefScore = {
-  visualOutcome: 2,
-  storyPotential: 2,
-  scopeFit: 4,
-  audienceMatch: 4,
-  aggregate: 3.0,
-};
-
-const NON_TRANSFORMABLE_SCORE: BriefScore = {
+const HIGH_SCORE: BriefScore = {
   visualOutcome: 4,
   storyPotential: 4,
   scopeFit: 4,
@@ -105,23 +97,50 @@ const NON_TRANSFORMABLE_SCORE: BriefScore = {
   aggregate: 4.0,
 };
 
+const LOW_TECHNICAL_FIT_SCORE: BriefScore = {
+  visualOutcome: 5,
+  storyPotential: 5,
+  scopeFit: 2,
+  audienceMatch: 2,
+  aggregate: 3.5,
+};
+
+const MINIMUM_GATE_SCORE: BriefScore = {
+  visualOutcome: 2,
+  storyPotential: 2,
+  scopeFit: 3,
+  audienceMatch: 3,
+  aggregate: 2.5,
+};
+
 const SAMPLE_TRANSFORM_JSON = JSON.stringify({
-  visualOutcome: 'Viewer sees Claude scaffolding the Vapi config in the editor, then a live phone call demo at the end.',
-  storyPotential: 'Client pain: hires can\'t take calls. Constraint: Vapi only — no Twilio.  Reveal: working voice agent.',
+  goal: 'Build a Vapi-driven inbound voice bot that screens leads and drops qualified ones into goHighLevel with a Gmail summary to Rick.',
+  finalProduct: 'Viewer sees a live phone call into the bot, the transcript streaming in the Vapi dashboard, and a new contact appearing in goHighLevel with a Gmail summary fired off.',
+  toolchain: [
+    { name: 'Vapi', role: 'voice surface and call routing', source: 'given' },
+    { name: 'goHighLevel', role: 'CRM destination for qualified leads', source: 'assumed' },
+    { name: 'Gmail', role: 'notification sink for Rick', source: 'assumed' },
+    { name: 'n8n', role: 'webhook routing between Vapi and downstream sinks', source: 'assumed' },
+  ],
+  buildSteps: [
+    { title: 'Scaffold Vapi assistant', description: 'Create a new Vapi assistant with the qualification prompt + voice settings.', estimatedMinutes: 25 },
+    { title: 'Wire n8n webhook', description: 'Stand up an n8n workflow that receives the post-call payload from Vapi.', estimatedMinutes: 30 },
+    { title: 'Connect goHighLevel', description: 'Add a goHighLevel contact-create node downstream of the qualification branch.', estimatedMinutes: 35 },
+    { title: 'Connect Gmail summary', description: 'Append a Gmail-send node so Rick gets a transcript + qualification verdict.', estimatedMinutes: 20 },
+    { title: 'Live test call', description: 'Place a real phone call to verify the end-to-end loop fires and the right side-effects land.', estimatedMinutes: 30 },
+  ],
+  shotHints: [
+    'Open Vapi dashboard, point to the call-flow editor and prompt',
+    'Show n8n workflow canvas building node by node',
+    'goHighLevel contacts list before/after the test call',
+    'Gmail inbox showing the summary land',
+    'Live test call with the transcript streaming on screen',
+  ],
   pinnedTechStack: {
     primary: 'tech_vapi',
     supporting: ['tech_n8n'],
-    rationale: 'Vapi is the voice surface; n8n routes downstream actions. Both are filmable and emerging.',
+    rationale: 'Vapi is the voice surface; n8n routes downstream actions. Both are filmable and complementary.',
   },
-  transformedBriefText: 'A small clinic needs an AI phone-screening agent. We build it with Vapi, route routine intakes through n8n, and demo the working call live on camera. The audience watches a real client constraint shape an architectural pick.',
-});
-
-const SAMPLE_RESCORE_JSON = JSON.stringify({
-  visualOutcome: 4,
-  storyPotential: 4,
-  scopeFit: 4,
-  audienceMatch: 4,
-  rationale: 'After framing: visible phone demo + clear arc; project unchanged.',
 });
 
 // -----------------------------------------------------------------------------
@@ -153,6 +172,19 @@ vi.mock('../../src/neurocore/audience-profiles.js', async () => {
         if (id === 'developer_longform') return mockAudience;
         throw new Error(`unexpected audience id ${id}`);
       }),
+    }),
+  };
+});
+
+vi.mock('../../src/neurocore/stack-performance.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../src/neurocore/stack-performance.js')
+  >('../../src/neurocore/stack-performance.js');
+  return {
+    ...actual,
+    getStackPerformanceClient: () => ({
+      list: vi.fn(async () => []),
+      get: vi.fn(async () => null),
     }),
   };
 });
@@ -189,69 +221,50 @@ beforeEach(() => {
 });
 
 // -----------------------------------------------------------------------------
-// isTransformable
+// isTransformable (new gate: scopeFit + audienceMatch >= 3.0, no narrative axes)
 // -----------------------------------------------------------------------------
 
-describe('isTransformable', () => {
-  it('returns true when both technical axes >= 3.5 and a narrative axis < 3.0', () => {
+describe('isTransformable (new gate)', () => {
+  it('returns true when BOTH technical axes >= 3.0, regardless of narrative scores', () => {
+    expect(isTransformable(HIGH_SCORE)).toBe(true); // 4/4/4/4
+    expect(isTransformable(MINIMUM_GATE_SCORE)).toBe(true); // 2/2/3/3
     expect(
       isTransformable({
-        visualOutcome: 2,
-        storyPotential: 4,
-        scopeFit: 4,
-        audienceMatch: 4,
-        aggregate: 3.5,
+        visualOutcome: 5,
+        storyPotential: 5,
+        scopeFit: 3,
+        audienceMatch: 3,
+        aggregate: 4.0,
       }),
     ).toBe(true);
+  });
+
+  it('returns false when scopeFit is below 3.0', () => {
+    expect(
+      isTransformable({
+        visualOutcome: 5,
+        storyPotential: 5,
+        scopeFit: 2.5,
+        audienceMatch: 4,
+        aggregate: 4.125,
+      }),
+    ).toBe(false);
+  });
+
+  it('returns false when audienceMatch is below 3.0', () => {
     expect(
       isTransformable({
         visualOutcome: 4,
-        storyPotential: 2,
-        scopeFit: 3.5,
-        audienceMatch: 3.5,
-        aggregate: 3.25,
-      }),
-    ).toBe(true);
-  });
-
-  it('returns false when both narrative axes are >= 3.0 (no rewrite needed)', () => {
-    expect(isTransformable(NON_TRANSFORMABLE_SCORE)).toBe(false);
-  });
-
-  it('returns false when scopeFit < 3.5 (technical fit too weak)', () => {
-    expect(
-      isTransformable({
-        visualOutcome: 1,
-        storyPotential: 1,
-        scopeFit: 3,
-        audienceMatch: 5,
-        aggregate: 2.5,
-      }),
-    ).toBe(false);
-  });
-
-  it('returns false when audienceMatch < 3.5 (wrong tribe)', () => {
-    expect(
-      isTransformable({
-        visualOutcome: 1,
-        storyPotential: 1,
-        scopeFit: 5,
-        audienceMatch: 3,
-        aggregate: 2.5,
-      }),
-    ).toBe(false);
-  });
-
-  it('accepts the Lisa-revised ideal candidate (visualOutcome 1.5 + storyPotential 1.5 + aggregate 2.75)', () => {
-    expect(
-      isTransformable({
-        visualOutcome: 1.5,
-        storyPotential: 1.5,
+        storyPotential: 4,
         scopeFit: 4,
-        audienceMatch: 4,
-        aggregate: 2.75,
+        audienceMatch: 2,
+        aggregate: 3.5,
       }),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it('rejects the 1/1/1/1 SaaS-config brief (both technical axes fail)', () => {
+    expect(isTransformable(LOW_TECHNICAL_FIT_SCORE)).toBe(false);
   });
 });
 
@@ -283,10 +296,9 @@ describe('transformBrief — gate failures', () => {
     }
   });
 
-  it('throws INVALID_OUTPUT when score does not meet transformability gate', async () => {
+  it('throws INVALID_OUTPUT when score fails the technical-fit gate', async () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: NON_TRANSFORMABLE_SCORE }, asDb());
-
+    await patchPipelineBrief(brief.id, { score: LOW_TECHNICAL_FIT_SCORE }, asDb());
     const provider = makeProvider([]);
     try {
       await transformBrief(brief.id, { provider, db: asDb() });
@@ -304,51 +316,49 @@ describe('transformBrief — gate failures', () => {
 // -----------------------------------------------------------------------------
 
 describe('transformBrief — happy path', () => {
-  it('transforms a transformable brief and persists all three M29 fields', async () => {
-    const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: TRANSFORMABLE_SCORE }, asDb());
-
-    const provider = makeProvider([SAMPLE_TRANSFORM_JSON, SAMPLE_RESCORE_JSON]);
+  it('extracts a build plan and persists transformedBuildPlan + pinnedTechStack', async () => {
+    const brief = await createBrief({ title: 'voice bot brief', rawText: 'create a voice bot using vapi' }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
+    const provider = makeProvider([SAMPLE_TRANSFORM_JSON]);
     const result = await transformBrief(brief.id, { provider, db: asDb() });
 
     expect(result.retried).toBe(false);
-    expect(result.brief.transformedBriefText).toMatch(/clinic needs an AI phone/);
+    expect(result.brief.transformedBuildPlan).not.toBeNull();
+    const plan = result.brief.transformedBuildPlan!;
+    expect(plan.goal).toMatch(/voice bot/);
+    expect(plan.finalProduct).toMatch(/phone call|transcript/);
+    expect(plan.toolchain).toHaveLength(4);
+    expect(plan.toolchain[0]!.source).toBe('given');
+    expect(plan.toolchain[1]!.source).toBe('assumed');
+    expect(plan.buildSteps).toHaveLength(5);
+    expect(plan.shotHints).toHaveLength(5);
+
     expect(result.brief.pinnedTechStack?.primary).toBe('tech_vapi');
     expect(result.brief.pinnedTechStack?.supporting).toEqual(['tech_n8n']);
-    expect(result.brief.transformedScore?.aggregate).toBe(4.0);
+
+    // Legacy fields stay null under the new transformer.
+    expect(result.brief.transformedBriefText).toBeNull();
+    expect(result.brief.transformedScore).toBeNull();
   });
 
-  it('reports drift on the visual+story axes (improvement is expected)', async () => {
+  it('admits a brief that scored 5/5/3/3 (high narrative, just-meets technical gate)', async () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: TRANSFORMABLE_SCORE }, asDb());
-
-    const provider = makeProvider([SAMPLE_TRANSFORM_JSON, SAMPLE_RESCORE_JSON]);
+    await patchPipelineBrief(
+      brief.id,
+      {
+        score: {
+          visualOutcome: 5,
+          storyPotential: 5,
+          scopeFit: 3,
+          audienceMatch: 3,
+          aggregate: 4.0,
+        },
+      },
+      asDb(),
+    );
+    const provider = makeProvider([SAMPLE_TRANSFORM_JSON]);
     const result = await transformBrief(brief.id, { provider, db: asDb() });
-
-    expect(result.drift.visualOutcomeDelta).toBeCloseTo(2);
-    expect(result.drift.storyPotentialDelta).toBeCloseTo(2);
-    expect(result.drift.scopeFitDelta).toBeCloseTo(0);
-    expect(result.drift.audienceMatchDelta).toBeCloseTo(0);
-    expect(result.drift.flagged).toBe(false);
-  });
-
-  it('flags drift when technical-axis delta exceeds threshold', async () => {
-    const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: TRANSFORMABLE_SCORE }, asDb());
-
-    // Re-score returns a score where scopeFit moved from 4 -> 2 (delta -2).
-    const driftedRescore = JSON.stringify({
-      visualOutcome: 4,
-      storyPotential: 4,
-      scopeFit: 2,
-      audienceMatch: 4,
-      rationale: 'transformer rewrote what the project is, not just framing',
-    });
-    const provider = makeProvider([SAMPLE_TRANSFORM_JSON, driftedRescore]);
-    const result = await transformBrief(brief.id, { provider, db: asDb() });
-
-    expect(result.drift.scopeFitDelta).toBeCloseTo(-2);
-    expect(result.drift.flagged).toBe(true);
+    expect(result.brief.transformedBuildPlan).not.toBeNull();
   });
 });
 
@@ -357,33 +367,37 @@ describe('transformBrief — happy path', () => {
 // -----------------------------------------------------------------------------
 
 describe('transformBrief — retry path', () => {
-  it('retries once on bad JSON from transform call, then succeeds', async () => {
+  it('retries once on bad JSON, then succeeds', async () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: TRANSFORMABLE_SCORE }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
 
-    const provider = makeProvider([
-      'not valid json at all',
-      SAMPLE_TRANSFORM_JSON,
-      SAMPLE_RESCORE_JSON,
-    ]);
+    const provider = makeProvider(['not valid json', SAMPLE_TRANSFORM_JSON]);
     const result = await transformBrief(brief.id, { provider, db: asDb() });
     expect(result.retried).toBe(true);
-    expect(result.brief.transformedBriefText).toBeTruthy();
+    expect(result.brief.transformedBuildPlan).not.toBeNull();
   });
 
   it('retries once when LLM picks a tech stack id not in the catalog', async () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: TRANSFORMABLE_SCORE }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
 
     const phantomPick = JSON.stringify({
+      goal: 'long enough goal sentence to clear the 20-char minimum',
+      finalProduct: 'long enough final product description to clear the 20-char minimum',
+      toolchain: [{ name: 'X', role: 'something', source: 'given' }],
+      buildSteps: [
+        { title: 'a', description: 'step one description', estimatedMinutes: 30 },
+        { title: 'b', description: 'step two description', estimatedMinutes: 30 },
+        { title: 'c', description: 'step three description', estimatedMinutes: 30 },
+      ],
+      shotHints: ['shot one hint', 'shot two hint', 'shot three hint'],
       pinnedTechStack: {
         primary: 'tech_phantom_does_not_exist',
         supporting: [],
         rationale: 'invalid pick',
       },
-      transformedBriefText: 'long-enough transformed brief text body to satisfy the schema minimum of 100 characters which is the rule.',
     });
-    const provider = makeProvider([phantomPick, SAMPLE_TRANSFORM_JSON, SAMPLE_RESCORE_JSON]);
+    const provider = makeProvider([phantomPick, SAMPLE_TRANSFORM_JSON]);
     const result = await transformBrief(brief.id, { provider, db: asDb() });
     expect(result.retried).toBe(true);
     expect(result.brief.pinnedTechStack?.primary).toBe('tech_vapi');
@@ -391,15 +405,19 @@ describe('transformBrief — retry path', () => {
 
   it('throws INVALID_OUTPUT when LLM picks phantom ids twice', async () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: TRANSFORMABLE_SCORE }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
 
     const phantom = JSON.stringify({
-      pinnedTechStack: {
-        primary: 'tech_phantom',
-        supporting: [],
-        rationale: 'still wrong',
-      },
-      transformedBriefText: 'long-enough transformed brief text body to satisfy the schema minimum of 100 characters which is the rule.',
+      goal: 'long enough goal sentence to clear the 20-char minimum',
+      finalProduct: 'long enough final product description to clear the 20-char minimum',
+      toolchain: [{ name: 'X', role: 'something', source: 'given' }],
+      buildSteps: [
+        { title: 'a', description: 'step one description', estimatedMinutes: 30 },
+        { title: 'b', description: 'step two description', estimatedMinutes: 30 },
+        { title: 'c', description: 'step three description', estimatedMinutes: 30 },
+      ],
+      shotHints: ['shot one hint', 'shot two hint', 'shot three hint'],
+      pinnedTechStack: { primary: 'tech_phantom', supporting: [], rationale: 'still wrong' },
     });
     const provider = makeProvider([phantom, phantom]);
     try {
@@ -413,7 +431,7 @@ describe('transformBrief — retry path', () => {
 
   it('throws LLM_FAILED when provider throws LLMProviderError', async () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: TRANSFORMABLE_SCORE }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
 
     const provider = makeProvider([
       { throws: new LLMProviderError('claude', 'TIMEOUT', 'provider timed out') },
@@ -429,13 +447,13 @@ describe('transformBrief — retry path', () => {
 });
 
 // -----------------------------------------------------------------------------
-// transformBrief — catalog/audience integration
+// transformBrief — catalog integration
 // -----------------------------------------------------------------------------
 
 describe('transformBrief — catalog integration', () => {
   it('throws INVALID_OUTPUT when tech-stack catalog is empty', async () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
-    await patchPipelineBrief(brief.id, { score: TRANSFORMABLE_SCORE }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
 
     mockTechStacks = [];
     const provider = makeProvider([]);

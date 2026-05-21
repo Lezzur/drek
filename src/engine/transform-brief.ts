@@ -7,11 +7,12 @@ import {
   patchPipelineBrief,
 } from '../db/pipeline-briefs.js';
 import {
-  briefScoreSchema,
   pinnedTechStackSchema,
+  transformedBuildPlanSchema,
   type BriefScore,
   type PinnedTechStack,
   type PipelineBrief,
+  type TransformedBuildPlan,
 } from '../db/schemas.js';
 import { extractJson } from './json-utils.js';
 import {
@@ -26,41 +27,34 @@ import {
   getStackPerformanceClient,
   type StackPerformance,
 } from '../neurocore/stack-performance.js';
-import { scoreBriefViaLLM } from '../intake/scoring.js';
 import { IntakeError } from '../intake/errors.js';
 
 /**
- * Call 11.5 of the v2.1 pipeline: Brief Transformer.
+ * Brief Transformer v2 (M29-redo).
  *
- * Promotes a "3.0+ with weak narrative axes" raw brief into a 5.0-grade
- * brief by extracting latent narrative (visualOutcome + storyPotential)
- * and pinning a tech stack from Neurocore's catalog. Per TECH-SPEC v2.1
- * §4 Piece 2.
+ * Replaces the original "narrative rewrite" transformer with a
+ * build-plan extractor. Per Rick + Lisa's spec discussion 2026-05-21:
  *
- * Transformability gate (Lisa-revised — no composite floor):
- *   scopeFit >= 3.5 AND audienceMatch >= 3.5 AND
- *   (visualOutcome < 3.0 OR storyPotential < 3.0)
+ *   Input:  a scored brief that meets a minimum technical fit
+ *           (scopeFit >= 3.0 AND audienceMatch >= 3.0).
+ *   Output: a structured build plan — goal, finalProduct, toolchain
+ *           (given + assumed tools), step-by-step build instructions,
+ *           and shot hints for the camera. Plus the pinned tech stack
+ *           validated against the Neurocore registry.
  *
- * Flow:
- *   1. Pre-condition checks (brief exists, score exists, gate passes)
- *   2. Fetch active TechStackProfiles from Neurocore (catalog block)
- *   3. Fetch the developer_longform AudienceProfile (voice block)
- *   4. LLM call with retry-once on bad JSON or invalid pick
- *   5. Validate pinnedTechStack against the registry (phantom ids → retry)
- *   6. Re-score the transformed brief via scoreBriefViaLLM (Call 11 again)
- *   7. Drift check: warn-log if scopeFit or audienceMatch deltas exceed
- *      ±0.5 (the transformer should preserve the project's technical shape)
- *   8. Persist {transformedBriefText, transformedScore, pinnedTechStack}
+ * Why this changed: the old transformer rewrote framing but didn't
+ * change what was buildable. The new one extracts buildable structure
+ * from a strong-fit brief so Rick can review the plan before promoting
+ * to a YouTube plan + recording.
  *
- * Failure semantics: PlanningEngineError-style codes via IntakeError.
- * Plan/brief state never advances on failure — the brief stays in its
- * pre-transform state, fully recoverable.
+ * Failure semantics: retry-once on bad JSON or invalid tech-stack
+ * pick; IntakeError after second failure. Brief stays unchanged on
+ * any failure path.
  */
 
 const STEP_NAME = 'transform-brief';
-const DEFAULT_TIMEOUT_MS = 60_000;
-const DRIFT_THRESHOLD = 0.5;
-const SHORTS_AUDIENCE_ID = 'developer_longform';
+const DEFAULT_TIMEOUT_MS = 90_000;
+const TARGET_AUDIENCE_ID = 'developer_longform';
 
 export interface TransformBriefOptions {
   provider?: LLMProvider;
@@ -72,59 +66,81 @@ export interface TransformBriefResult {
   brief: PipelineBrief;
   retried: boolean;
   durationMs: number;
-  drift: {
-    scopeFitDelta: number;
-    audienceMatchDelta: number;
-    visualOutcomeDelta: number;
-    storyPotentialDelta: number;
-    flagged: boolean;
-  };
 }
 
 /**
- * Lisa-revised gate (TECH-SPEC v2.1 §4 Piece 2). NO composite floor —
- * the per-axis shape IS the gate. A brief at
- * {scopeFit: 4, audienceMatch: 4, visualOutcome: 1.5, storyPotential: 1.5}
- * is the ideal transformer candidate even though its aggregate is 2.75.
+ * Gate: a brief is transformable iff it meets a minimum technical fit.
+ * No narrative-axis check — the new transformer extracts build steps
+ * regardless of how the brief is framed, so visualOutcome/storyPotential
+ * are irrelevant to whether the transform CAN happen (they're still
+ * relevant to whether the topic is worth recording, but that's a human
+ * judgment call now, not a gate).
  */
 export function isTransformable(score: BriefScore): boolean {
-  return (
-    score.scopeFit >= 3.5 &&
-    score.audienceMatch >= 3.5 &&
-    (score.visualOutcome < 3.0 || score.storyPotential < 3.0)
-  );
+  return score.scopeFit >= 3.0 && score.audienceMatch >= 3.0;
 }
 
 const llmTransformSchema = z.object({
-  visualOutcome: z.string().min(20).max(1500).optional(),
-  storyPotential: z.string().min(20).max(1500).optional(),
+  goal: z.string().min(20).max(800),
+  finalProduct: z.string().min(20).max(800),
+  toolchain: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(120),
+        role: z.string().min(1).max(300),
+        source: z.enum(['given', 'assumed']),
+      }),
+    )
+    .min(1)
+    .max(8),
+  buildSteps: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(200),
+        description: z.string().min(1).max(800),
+        estimatedMinutes: z.number().int().min(1).max(240),
+      }),
+    )
+    .min(3)
+    .max(12),
+  shotHints: z.array(z.string().min(5).max(200)).min(3).max(12),
   pinnedTechStack: pinnedTechStackSchema,
-  transformedBriefText: z.string().min(100).max(20_000),
 });
 type LLMTransformOutput = z.infer<typeof llmTransformSchema>;
 
-const SYSTEM_HEADER = `You are rewriting a freelance job brief so it scores higher on the YouTube production rubric.
+const SYSTEM_HEADER = `You are turning a freelance/client brief into a buildable plan for a YouTube "build along with Claude Code" video.
 
-The brief comes in WITH SCORES already attached. Your job is NOT to score it — that's a separate step. Your job is to:
-1. Extract the latent narrative that's there but unstated. Most freelance briefs were written for engineers, not cameras. They describe the deliverable but never the story.
-2. Commit to ONE tech stack from the Neurocore catalog (provided below). The deliverable shouldn't change; the story around it gets sharpened.
-3. Preserve scopeFit and audienceMatch — DO NOT change what the project actually is, only how it's framed for video.
+The brief tells you WHAT the client wants and (usually) which one tool they require. Your job is to extract the latent BUILD: the goal, the final demo state, the full toolchain (including tools the brief didn't name but the build obviously needs), the step-by-step instructions, and the shots that step list implies.
 
 OUTPUT FORMAT — return a SINGLE JSON object:
 {
-  "visualOutcome": "<one paragraph describing what the viewer sees working on screen — before/after state, the 10-second wow shot. OMIT this field if the brief's visualOutcome score was already >= 3.0.>",
-  "storyPotential": "<one paragraph describing the arc: client pain → architectural constraint → build tension → reveal. OMIT this field if the brief's storyPotential score was already >= 3.0.>",
+  "goal": "<one paragraph: what we're building and the business outcome it delivers>",
+  "finalProduct": "<one paragraph: what the viewer sees working at the end — the 10-second wow shot>",
+  "toolchain": [
+    { "name": "<Tool name>", "role": "<what role it plays>", "source": "given" | "assumed" },
+    ...
+  ],
+  "buildSteps": [
+    { "title": "<short imperative title>", "description": "<what gets built in this step>", "estimatedMinutes": <int 1-240> },
+    ...  3 to 12 steps total
+  ],
+  "shotHints": [
+    "<short directive: 'open Vapi dashboard, point to call-flow editor'>",
+    ...  3 to 12 hints total
+  ],
   "pinnedTechStack": {
-    "primary": "<tech_<slug> from the catalog — ONLY use ids that appear in the catalog below>",
-    "supporting": ["<tech_<slug>>", "..."],   // 0-4 supporting stack ids
-    "rationale": "<1-3 sentences on why this stack is the right pick for this brief>"
-  },
-  "transformedBriefText": "<the full reassembled brief — keep the project description faithful but add the visual + story scaffolding. 100-20000 chars.>"
+    "primary": "<tech_<slug> from the catalog below>",
+    "supporting": ["<tech_<slug>>", "..."],
+    "rationale": "<1-3 sentences on why this stack is the right pick>"
+  }
 }
 
 RULES:
-- Tech-stack ids MUST exist in the catalog below. Inventing a slug → invalid output → retry.
-- Do NOT change the underlying project. If the raw brief was "build a CRUD app for inventory", the transformed brief is still a CRUD-app-for-inventory build — just with the story scaffolding.
+- Tech-stack ids in pinnedTechStack MUST exist in the catalog below. Inventing a slug → invalid output → retry.
+- toolchain entries: mark "given" when the brief explicitly names the tool, "assumed" when you're filling in what the build obviously needs. The brief is allowed to give one tool (e.g., "Vapi") and you fill in the rest.
+- buildSteps must be Claude-Code-executable. Each step should describe an actionable build chunk (not "discuss" or "consider"). estimatedMinutes is your honest guess.
+- shotHints describe what the camera should be on during the build — UI screens, terminal output, live demo moments. They don't need to map 1:1 to buildSteps.
+- The total estimated build time (sum of estimatedMinutes) should be 60-240 minutes — a 2-to-4-hour Claude Code session. Adjust step granularity to hit that envelope.
 - Output JSON ONLY. No fences, no prose. Start with { and end with }.`;
 
 function buildPrompt(
@@ -148,11 +164,11 @@ function buildPrompt(
     `Voice: ${audience.voiceGuidelines.tone}; ${audience.voiceGuidelines.vocabulary}`,
   ].join('\n');
 
-  const scoreBlock = `PRE-TRANSFORM SCORES (DO NOT CHANGE the project — only the framing):
+  const scoreBlock = `BRIEF SCORES (informational — gate already passed):
   visualOutcome:  ${rawScore.visualOutcome}/5
   storyPotential: ${rawScore.storyPotential}/5
-  scopeFit:       ${rawScore.scopeFit}/5  (must preserve)
-  audienceMatch:  ${rawScore.audienceMatch}/5  (must preserve)`;
+  scopeFit:       ${rawScore.scopeFit}/5
+  audienceMatch:  ${rawScore.audienceMatch}/5`;
 
   const historyBlock = buildChannelHistoryBlock(channelHistory, techStacks);
 
@@ -178,15 +194,6 @@ function buildPrompt(
     .join('\n');
 }
 
-/**
- * CHANNEL HISTORY block — populated from Neurocore StackPerformance once
- * Rick's channel has at least one published video. Until then, the
- * empty-data fallback tells the LLM there's no signal to bias toward.
- *
- * Tie-break rule encodes Rick's instruction from spec discussion:
- * popular stacks STAY popular because that's what audiences want; only
- * NICHE stacks get the "give the underdog a shot" treatment.
- */
 function buildChannelHistoryBlock(
   history: StackPerformance[],
   techStacks: TechStackProfile[],
@@ -199,9 +206,9 @@ function buildChannelHistoryBlock(
   }
   const tierById = new Map(techStacks.map((t) => [t.id, t.popularityTier]));
   const lines = history
-    .slice() // copy before sort
+    .slice()
     .sort((a, b) => b.avgViews - a.avgViews)
-    .slice(0, 10) // cap the block — 10 rows is plenty of signal
+    .slice(0, 10)
     .map((h) => {
       const tier = tierById.get(h.techStackProfileId) ?? 'unknown';
       const views = Math.round(h.avgViews);
@@ -282,18 +289,14 @@ export async function transformBrief(
   if (!isTransformable(brief.score)) {
     throw new IntakeError(
       'INVALID_OUTPUT',
-      `brief is not transformable: scopeFit=${brief.score.scopeFit}, audienceMatch=${brief.score.audienceMatch}, visualOutcome=${brief.score.visualOutcome}, storyPotential=${brief.score.storyPotential}. Gate requires both technical axes >= 3.5 AND at least one narrative axis < 3.0.`,
+      `brief is not transformable: scopeFit=${brief.score.scopeFit}, audienceMatch=${brief.score.audienceMatch}. Gate requires BOTH technical axes >= 3.0.`,
       { briefId },
     );
   }
 
-  // Fetch the catalog + audience profile + channel history in parallel.
-  // History is best-effort: an empty array or a failed Neurocore call
-  // just means the LLM gets the "no data yet" fallback. We never block
-  // a transform on history availability.
   const [techStacks, audience, channelHistory] = await Promise.all([
     getTechStackProfileClient().list({ status: 'active' }),
-    getAudienceProfileClient().get(SHORTS_AUDIENCE_ID),
+    getAudienceProfileClient().get(TARGET_AUDIENCE_ID),
     loadChannelHistoryBestEffort(),
   ]);
 
@@ -305,8 +308,7 @@ export async function transformBrief(
     );
   }
 
-  const rawScore = brief.score;
-  const prompt = buildPrompt(brief, rawScore, audience, techStacks, channelHistory);
+  const prompt = buildPrompt(brief, brief.score, audience, techStacks, channelHistory);
 
   let result: LLMTransformOutput;
   let retried = false;
@@ -331,10 +333,7 @@ export async function transformBrief(
             { briefId, detail: parsed2.detail },
           );
         }
-        const techCheck2 = validateTechStack(
-          parsed2.value.pinnedTechStack,
-          techStacks,
-        );
+        const techCheck2 = validateTechStack(parsed2.value.pinnedTechStack, techStacks);
         if (!techCheck2.valid) {
           throw new IntakeError(
             'INVALID_OUTPUT',
@@ -356,10 +355,7 @@ export async function transformBrief(
           { briefId, detail: parsed2.detail },
         );
       }
-      const techCheck2 = validateTechStack(
-        parsed2.value.pinnedTechStack,
-        techStacks,
-      );
+      const techCheck2 = validateTechStack(parsed2.value.pinnedTechStack, techStacks);
       if (!techCheck2.valid) {
         throw new IntakeError(
           'INVALID_OUTPUT',
@@ -382,16 +378,21 @@ export async function transformBrief(
   }
 
   const pinnedTechStack = pinnedTechStackSchema.parse(result.pinnedTechStack);
+  const transformedBuildPlan: TransformedBuildPlan = transformedBuildPlanSchema.parse({
+    goal: result.goal,
+    finalProduct: result.finalProduct,
+    toolchain: result.toolchain,
+    buildSteps: result.buildSteps,
+    shotHints: result.shotHints,
+  });
 
-  // Persist the transformed brief BEFORE re-scoring so the re-score reads
-  // from the right source. We patch `transformedBriefText` + tech stack
-  // first; `transformedScore` follows after the second LLM call.
+  let updated: PipelineBrief | null;
   try {
-    await patchPipelineBrief(
+    updated = await patchPipelineBrief(
       briefId,
       {
-        transformedBriefText: result.transformedBriefText,
         pinnedTechStack,
+        transformedBuildPlan,
       },
       opts.db,
     );
@@ -399,36 +400,6 @@ export async function transformBrief(
     throw new IntakeError(
       'PERSIST_FAILED',
       `failed to persist transformed brief: ${(err as Error).message}`,
-      { briefId },
-    );
-  }
-
-  // Re-score the transformed brief by temporarily swapping rawText for the
-  // transformed text via a scoped fake brief. The existing scoring engine
-  // reads `brief.rawText` — but we want to score the transformed version.
-  // The cleanest path is a small ad-hoc scoring helper rather than mutating
-  // the brief doc back and forth.
-  const transformedScore = await scoreBriefByText(
-    {
-      title: brief.title,
-      company: brief.company,
-      text: result.transformedBriefText,
-    },
-    { provider, timeoutMs },
-  );
-
-  // Persist the transformedScore.
-  let updated: PipelineBrief | null;
-  try {
-    updated = await patchPipelineBrief(
-      briefId,
-      { transformedScore },
-      opts.db,
-    );
-  } catch (err) {
-    throw new IntakeError(
-      'PERSIST_FAILED',
-      `failed to persist transformedScore: ${(err as Error).message}`,
       { briefId },
     );
   }
@@ -440,101 +411,35 @@ export async function transformBrief(
     );
   }
 
-  // Drift detection. The transformer should preserve scopeFit + audienceMatch
-  // (the project itself didn't change), and improve visualOutcome / storyPotential
-  // (which is the whole point). Large deltas on the technical axes mean the
-  // transformer is rewriting facts, not framing. Log a warning so the
-  // future drift report can pick it up; never fail the transform on drift
-  // alone (the user can still inspect the result).
-  const drift = {
-    scopeFitDelta: transformedScore.scopeFit - rawScore.scopeFit,
-    audienceMatchDelta: transformedScore.audienceMatch - rawScore.audienceMatch,
-    visualOutcomeDelta: transformedScore.visualOutcome - rawScore.visualOutcome,
-    storyPotentialDelta: transformedScore.storyPotential - rawScore.storyPotential,
-    flagged: false,
-  };
-  drift.flagged =
-    Math.abs(drift.scopeFitDelta) > DRIFT_THRESHOLD ||
-    Math.abs(drift.audienceMatchDelta) > DRIFT_THRESHOLD;
-  if (drift.flagged) {
-    logger.warn(
-      {
-        step: STEP_NAME,
-        briefId,
-        drift,
-      },
-      'transform-brief: technical-axis drift exceeds threshold — transformer may be rewriting facts',
-    );
-  }
-
   const durationMs = Date.now() - t0;
+  const totalEstimateMinutes = transformedBuildPlan.buildSteps.reduce(
+    (sum, s) => sum + s.estimatedMinutes,
+    0,
+  );
   logger.info(
     {
       step: STEP_NAME,
       briefId,
       pinnedTechStack: pinnedTechStack.primary,
       retried,
-      drift,
+      buildStepCount: transformedBuildPlan.buildSteps.length,
+      totalEstimateMinutes,
       durationMs,
     },
-    'brief transformed',
+    'brief transformed (M29-redo: build plan extracted)',
   );
 
   return {
     brief: updated,
     retried,
     durationMs,
-    drift,
   };
 }
 
-// ---------------------------------------------------------------------------
-// scoreBriefByText — scores arbitrary brief text WITHOUT writing back to
-// Firestore. Used internally for the post-transform re-score. Built as a
-// thin wrapper around scoreBriefViaLLM via a synthetic in-memory brief.
-//
-// We can't just call scoreBriefViaLLM directly because it persists by
-// briefId. So we briefly stash the transformed text on the brief's
-// rawText, score it, then restore the original. Concurrency-safe because
-// only one transform runs per brief at a time (no cross-transform locking
-// needed — the transform is gated on a button click in the UI).
-// ---------------------------------------------------------------------------
-
-interface BriefScoringInput {
-  title: string;
-  company: string | null;
-  text: string;
-}
-
-async function scoreBriefByText(
-  input: BriefScoringInput,
-  opts: { provider: LLMProvider; timeoutMs: number },
-): Promise<BriefScore> {
-  // Build a minimal in-memory scoring path that doesn't depend on
-  // briefId/Firestore. This is intentionally a near-duplicate of the
-  // scoring engine's prompt+parse flow because:
-  //   1. We want zero Firestore writes during the re-score
-  //   2. We don't want the briefId-scoped error codes leaking out
-  //   3. The output type is just BriefScore — no need for rationale
-  //
-  // If you change scoring.ts's prompt or schema, mirror it here too.
-  // The two paths are coupled by design — they're both Call 11.
-  const { scoreBriefTextDirect } = await import('../intake/scoring.js');
-  return scoreBriefTextDirect(
-    { title: input.title, company: input.company, text: input.text },
-    opts,
-  );
-}
-
 /**
- * Channel-history loader (M31). Returns the StackPerformance list, or
+ * Channel-history loader. Returns the StackPerformance list, or
  * an empty array when Neurocore is unreachable / hasn't been seeded yet.
- * We swallow ALL failures here intentionally — coverage rotation is a
- * nice-to-have for the transformer, not a hard dependency. The "no data
- * yet" fallback in the prompt is the same string the LLM sees when
- * history truly is empty, so the LLM can't distinguish "missing because
- * Neurocore is down" from "missing because channel is new" — that's by
- * design (degrade silently).
+ * Best-effort: never blocks a transform on history availability.
  */
 async function loadChannelHistoryBestEffort(): Promise<StackPerformance[]> {
   try {

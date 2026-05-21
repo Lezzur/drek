@@ -494,6 +494,41 @@ export const pinnedTechStackSchema = z.object({
 });
 export type PinnedTechStack = z.infer<typeof pinnedTechStackSchema>;
 
+/**
+ * v2.1.1 Brief Transformer (M29-redo) — the LLM's structured build plan.
+ * Replaces the original "narrative rewrite" output. The transformer's
+ * job is now to extract the latent build steps from a brief: what's the
+ * goal, what does the viewer see at the end, which tools are needed
+ * (some given by the brief, others the LLM assumes for the demo), what
+ * are the step-by-step instructions Claude Code would follow, and what
+ * shots does that imply.
+ *
+ * The original `transformedBriefText` field is preserved as null for
+ * future scratch use; the actual transformer output lives here.
+ */
+export const toolchainEntrySchema = z.object({
+  name: z.string().min(1).max(120),
+  role: z.string().min(1).max(300),
+  source: z.enum(['given', 'assumed']),
+});
+export type ToolchainEntry = z.infer<typeof toolchainEntrySchema>;
+
+export const buildStepSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().min(1).max(800),
+  estimatedMinutes: z.number().int().min(1).max(240),
+});
+export type BuildStep = z.infer<typeof buildStepSchema>;
+
+export const transformedBuildPlanSchema = z.object({
+  goal: z.string().min(20).max(800),
+  finalProduct: z.string().min(20).max(800),
+  toolchain: z.array(toolchainEntrySchema).min(1).max(8),
+  buildSteps: z.array(buildStepSchema).min(3).max(12),
+  shotHints: z.array(z.string().min(5).max(200)).min(3).max(12),
+});
+export type TransformedBuildPlan = z.infer<typeof transformedBuildPlanSchema>;
+
 export const pipelineBriefSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1).max(300),
@@ -507,14 +542,17 @@ export const pipelineBriefSchema = z.object({
   /** v2.1: group briefs submitted in the same batch-intake form. Null for
    *  briefs created via the single-brief intake or pre-v2.1 docs. */
   batchId: z.string().nullable().default(null),
-  /** v2.1 M29: post-Transformer rewritten brief text. Null until Rick
-   *  clicks Transform on a brief that passes the transformability gate. */
+  /** v2.1 M29 (legacy narrative-rewrite output, kept for back-compat).
+   *  Always null on briefs transformed under M29-redo / Option A. */
   transformedBriefText: z.string().max(MAX_BRIEF_RAW_TEXT_BYTES).nullable().default(null),
-  /** v2.1 M29: score of the transformed brief, re-run through Call 11
-   *  immediately after transformation. Compared with `score` for drift. */
+  /** v2.1 M29 (legacy re-score from narrative-rewrite path). Always null
+   *  under M29-redo — the new transformer doesn't change scores. */
   transformedScore: briefScoreSchema.nullable().default(null),
   /** v2.1 M29: tech stack the transformer committed the brief to. */
   pinnedTechStack: pinnedTechStackSchema.nullable().default(null),
+  /** v2.1.1 M29-redo: structured build plan extracted by the transformer.
+   *  This is the primary transformer output going forward. */
+  transformedBuildPlan: transformedBuildPlanSchema.nullable().default(null),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -533,6 +571,7 @@ export const pipelineBriefCreateSchema = pipelineBriefSchema
     transformedBriefText: true,
     transformedScore: true,
     pinnedTechStack: true,
+    transformedBuildPlan: true,
   });
 export type PipelineBriefCreate = z.infer<typeof pipelineBriefCreateSchema>;
 

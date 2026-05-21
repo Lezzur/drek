@@ -21,6 +21,7 @@ function fakeBrief(overrides: Partial<PipelineBrief> = {}): PipelineBrief {
     transformedBriefText: null,
     transformedScore: null,
     pinnedTechStack: null,
+    transformedBuildPlan: null,
     createdAt: new Date('2026-05-01T00:00:00Z'),
     updatedAt: new Date('2026-05-01T00:00:00Z'),
     ...overrides,
@@ -156,22 +157,55 @@ describe('BriefDetailPage', () => {
 });
 
 // ---------------------------------------------------------------------------
-// M29 — Transform button + before/after panel
+// M29-redo — Transform button + build-plan panel
 // ---------------------------------------------------------------------------
 
 function transformableScore(): BriefScore {
-  // Weak narrative axes, strong technical fit — passes the M29 gate.
+  // 4/4/4/4 — meets the new technical-fit gate (>= 3.0 on scopeFit + audienceMatch).
   return {
-    visualOutcome: 2,
-    storyPotential: 2,
+    visualOutcome: 4,
+    storyPotential: 4,
     scopeFit: 4,
     audienceMatch: 4,
-    aggregate: 3.0,
+    aggregate: 4.0,
   };
 }
 
-describe('BriefDetailPage — Transform button', () => {
-  it('shows Transform button when score passes the transformability gate', () => {
+function failingScore(): BriefScore {
+  // 5/5/2/2 — high narrative but technical axes below the gate.
+  return {
+    visualOutcome: 5,
+    storyPotential: 5,
+    scopeFit: 2,
+    audienceMatch: 2,
+    aggregate: 3.5,
+  };
+}
+
+function samplePlan() {
+  return {
+    goal: 'Build a Vapi voice bot that qualifies inbound leads + drops them into goHighLevel.',
+    finalProduct: 'Viewer sees a live phone call streaming a transcript and a new contact landing in goHighLevel.',
+    toolchain: [
+      { name: 'Vapi', role: 'voice surface', source: 'given' as const },
+      { name: 'goHighLevel', role: 'CRM destination', source: 'assumed' as const },
+      { name: 'Gmail', role: 'notification sink', source: 'assumed' as const },
+    ],
+    buildSteps: [
+      { title: 'Scaffold Vapi assistant', description: 'New assistant with qualification prompt.', estimatedMinutes: 25 },
+      { title: 'Wire goHighLevel webhook', description: 'Receive Vapi post-call payload.', estimatedMinutes: 35 },
+      { title: 'Live test call', description: 'Place a real phone call end to end.', estimatedMinutes: 30 },
+    ],
+    shotHints: [
+      'Open Vapi dashboard, point to call-flow editor',
+      'goHighLevel contacts list before/after',
+      'Live test call with transcript on screen',
+    ],
+  };
+}
+
+describe('BriefDetailPage — Transform button (M29-redo)', () => {
+  it('shows the Transform → build plan button when technical-fit gate passes', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: fakeBrief({ score: transformableScore() }),
@@ -179,59 +213,44 @@ describe('BriefDetailPage — Transform button', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).toContain('Transform brief');
+    expect(html).toContain('Transform → build plan');
     expect(html).toContain('hx-post="/intake/brief_abc/transform"');
-    expect(html).toContain('transformer candidate');
+    expect(html).toContain('extract the build plan');
   });
 
-  it('does NOT show Transform button when score fails the gate', () => {
-    // All axes high — no narrative weakness, gate fails.
+  it('does NOT show the Transform button when technical axes are below the gate', () => {
     const html = toHtml(
       BriefDetailPage({
-        brief: fakeBrief({ score: fakeScore() }),
+        brief: fakeBrief({ score: failingScore() }),
         formatProfiles: [fakeFormatProfile()],
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).not.toContain('Transform brief');
+    expect(html).not.toContain('Transform → build plan');
   });
 
-  it('does NOT show Transform button when brief is already transformed', () => {
+  it('hides the initial Transform button once the brief has a build plan; shows Re-transform instead', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: fakeBrief({
           score: transformableScore(),
-          transformedBriefText: 'already rewritten',
-          transformedScore: { ...transformableScore(), visualOutcome: 4, storyPotential: 4, aggregate: 4.0 },
-          pinnedTechStack: {
-            primary: 'tech_vapi',
-            supporting: [],
-            rationale: 'voice surface',
-          },
+          transformedBuildPlan: samplePlan(),
+          pinnedTechStack: { primary: 'tech_vapi', supporting: [], rationale: 'r' },
         }),
         formatProfiles: [fakeFormatProfile()],
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    // The big "Transform brief" CTA in the score panel must be gone; the
-    // before/after panel shows the (different-text) "Re-transform" instead.
-    expect(html).not.toContain('Transform brief');
+    expect(html).not.toContain('Transform → build plan');
     expect(html).toContain('Re-transform');
   });
 });
 
-describe('BriefDetailPage — TransformPanel', () => {
+describe('BriefDetailPage — TransformPanel (build plan)', () => {
   function transformedBrief() {
     return fakeBrief({
       score: transformableScore(),
-      transformedBriefText: 'A small clinic needs a Vapi-driven phone screening agent...',
-      transformedScore: {
-        visualOutcome: 4,
-        storyPotential: 4,
-        scopeFit: 4,
-        audienceMatch: 4,
-        aggregate: 4.0,
-      },
+      transformedBuildPlan: samplePlan(),
       pinnedTechStack: {
         primary: 'tech_vapi',
         supporting: ['tech_n8n'],
@@ -240,7 +259,7 @@ describe('BriefDetailPage — TransformPanel', () => {
     });
   }
 
-  it('renders transformed brief score, pinned stack, and re-transform button', () => {
+  it('renders goal, final product, toolchain, build steps, shot hints, and tech stack', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: transformedBrief(),
@@ -248,45 +267,25 @@ describe('BriefDetailPage — TransformPanel', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).toContain('Transformed brief');
-    expect(html).toContain('Score comparison');
+    expect(html).toContain('Build plan');
+    expect(html).toContain('Goal');
+    expect(html).toContain('Final product');
+    expect(html).toContain('Toolchain');
+    expect(html).toContain('Build steps');
+    expect(html).toContain('Shot hints');
     expect(html).toContain('Pinned tech stack');
     expect(html).toContain('tech_vapi');
     expect(html).toContain('tech_n8n');
     expect(html).toContain('voice surface + downstream automation');
-    expect(html).toContain('Re-transform');
-    expect(html).toContain('A small clinic needs a Vapi-driven phone');
+    expect(html).toContain('Vapi voice bot');
+    expect(html).toContain('Scaffold Vapi assistant');
+    expect(html).toContain('25 min');
+    // Source HTML has lowercase 'given' / 'assumed'; CSS uppercases for display.
+    expect(html).toContain('given');
+    expect(html).toContain('assumed');
   });
 
-  it('shows drift warning when technical-axis delta exceeds 0.5', () => {
-    const brief = fakeBrief({
-      score: transformableScore(),
-      transformedBriefText: 'rewritten text...',
-      transformedScore: {
-        visualOutcome: 4,
-        storyPotential: 4,
-        // scopeFit moved from 4 -> 2 (delta -2) → drift!
-        scopeFit: 2,
-        audienceMatch: 4,
-        aggregate: 3.5,
-      },
-      pinnedTechStack: {
-        primary: 'tech_vapi',
-        supporting: [],
-        rationale: 'r',
-      },
-    });
-    const html = toHtml(
-      BriefDetailPage({
-        brief,
-        formatProfiles: [fakeFormatProfile()],
-        audienceProfiles: [fakeAudienceProfile()],
-      }),
-    );
-    expect(html).toContain('Technical-axis drift');
-  });
-
-  it('hides drift warning when technical axes are preserved', () => {
+  it('shows the total estimated minutes (sum of step estimates)', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: transformedBrief(),
@@ -294,10 +293,22 @@ describe('BriefDetailPage — TransformPanel', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).not.toContain('Technical-axis drift');
+    // 25 + 35 + 30 = 90
+    expect(html).toContain('~90 min total');
   });
 
-  it('does NOT render the panel when there is no transformed brief', () => {
+  it('renders the Re-transform button', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: transformedBrief(),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    expect(html).toContain('Re-transform');
+  });
+
+  it('does NOT render the panel when the brief has no build plan', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: fakeBrief({ score: transformableScore() }),
@@ -305,7 +316,7 @@ describe('BriefDetailPage — TransformPanel', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).not.toContain('Transformed brief');
-    expect(html).not.toContain('Score comparison');
+    expect(html).not.toContain('Build plan');
+    expect(html).not.toContain('Toolchain');
   });
 });

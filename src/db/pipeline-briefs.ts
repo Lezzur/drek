@@ -39,6 +39,8 @@ function docToBrief(id: string, data: Record<string, unknown>): PipelineBrief {
     transformedBriefText: (data.transformedBriefText as string | null) ?? null,
     transformedScore: (data.transformedScore as Record<string, unknown> | null) ?? null,
     pinnedTechStack: (data.pinnedTechStack as Record<string, unknown> | null) ?? null,
+    transformedBuildPlan:
+      (data.transformedBuildPlan as Record<string, unknown> | null) ?? null,
     createdAt: tsToDate(data.createdAt),
     updatedAt: tsToDate(data.updatedAt),
   });
@@ -63,6 +65,7 @@ export async function createPipelineBrief(
     transformedBriefText: input.transformedBriefText ?? null,
     transformedScore: input.transformedScore ?? null,
     pinnedTechStack: input.pinnedTechStack ?? null,
+    transformedBuildPlan: input.transformedBuildPlan ?? null,
     createdAt: now,
     updatedAt: now,
   };
@@ -185,6 +188,7 @@ export async function createBriefBatch(
       transformedBriefText: null,
       transformedScore: null,
       pinnedTechStack: null,
+      transformedBuildPlan: null,
       createdAt: now,
       updatedAt: now,
     };

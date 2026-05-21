@@ -438,7 +438,8 @@ app.post('/intake/:briefId/transform', async (c) => {
       {
         briefId,
         pinnedTechStack: result.brief.pinnedTechStack?.primary,
-        drift: result.drift,
+        buildStepCount: result.brief.transformedBuildPlan?.buildSteps.length ?? 0,
+        retried: result.retried,
       },
       'intake.transform: brief transformed',
     );

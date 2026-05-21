@@ -99,6 +99,7 @@ function fakeBrief(overrides: Partial<PipelineBrief> = {}): PipelineBrief {
     transformedBriefText: null,
     transformedScore: null,
     pinnedTechStack: null,
+    transformedBuildPlan: null,
     createdAt: new Date('2026-05-01T00:00:00Z'),
     updatedAt: new Date('2026-05-01T00:00:00Z'),
     ...overrides,

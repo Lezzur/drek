@@ -426,6 +426,21 @@ describe('BriefDetailPage — score edit form reason field (M35)', () => {
   });
 });
 
+describe('BriefDetailPage — brief-text panel default state', () => {
+  it('renders the Brief text disclosure expanded by default (open attr)', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief(),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    // <details open> serializes as either `open` or `open=""` depending on
+    // the JSX runtime; accept both.
+    expect(html).toMatch(/<details class="brief-text-panel"[^>]*\sopen(?:=""|\s|>)/);
+  });
+});
+
 describe('BriefDetailPage — Transform/Re-transform loading spinner (M35.1)', () => {
   it('Transform button wires hx-indicator + hx-disabled-elt to the spinner span', () => {
     const html = toHtml(

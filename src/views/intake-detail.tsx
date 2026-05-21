@@ -837,16 +837,23 @@ export const BriefDetailPage: FC<BriefDetailPageProps> = ({
 
       <div style="display:grid; grid-template-columns:1fr 340px; gap:20px; align-items:flex-start;">
         <div>
-          <details style="margin-bottom:16px;">
+          {/* Open by default per Rick — he reads the brief text on every visit
+              so collapsing it just hid information he always wanted. The
+              <details> element still lets him collapse manually if he wants to. */}
+          <details class="brief-text-panel" open style="margin-bottom:16px;">
             <summary style="cursor:pointer; font-size:14px; color:var(--ink-3); padding:12px 16px; background:var(--surface); border:1px solid var(--border); border-radius:8px; list-style:none; display:flex; align-items:center; gap:8px;">
               <span style="font-size:12px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase;">Brief text</span>
               <span class="spacer" />
-              <span style="font-size:12px;">{brief.rawText.length.toLocaleString()} chars ▾</span>
+              <span class="brief-text-toggle" style="font-size:12px;">{brief.rawText.length.toLocaleString()} chars</span>
             </summary>
             <div style="border:1px solid var(--border); border-top:none; border-radius:0 0 8px 8px; padding:16px; background:var(--surface);">
               <pre style="white-space:pre-wrap; font-family:inherit; font-size:13px; color:var(--ink-2); line-height:1.6; margin:0; overflow-wrap:break-word;">{brief.rawText}</pre>
             </div>
           </details>
+          <style dangerouslySetInnerHTML={{ __html: `
+            .brief-text-panel .brief-text-toggle::after { content: ' ▾'; }
+            .brief-text-panel[open] .brief-text-toggle::after { content: ' ▴'; }
+          ` }} />
 
           <div class="card" style="margin-bottom:16px;">
             <h3 class="section-label">Stage transition</h3>

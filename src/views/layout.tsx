@@ -355,7 +355,7 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
 button.btn.htmx-request { opacity: 0.55; cursor: wait; pointer-events: none; }
 button.btn[disabled] { opacity: 0.55; cursor: wait; pointer-events: none; }
 @keyframes drek-spin { to { transform: rotate(360deg); } }
-.score-spinner { display: none; align-items: center; gap: 6px; margin-left: 10px; font-size: 13px; color: var(--ink-3); vertical-align: middle; }
+.score-spinner { display: none; align-items: center; gap: 8px; margin-left: 16px; font-size: 13px; color: var(--ink-3); vertical-align: middle; }
 .score-spinner.htmx-request { display: inline-flex; }
 .score-spinner::before { content: ''; flex-shrink: 0; width: 12px; height: 12px; border: 2px solid rgba(122,120,114,0.25); border-top-color: var(--ink-3); border-radius: 50%; animation: drek-spin 0.75s linear infinite; }
 .pipeline-indicator {

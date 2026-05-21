@@ -99,15 +99,18 @@ describe('quota — cap configuration', () => {
 
 describe('quota — UTC day rollover', () => {
   it('resets counter when the UTC day changes', () => {
+    // Set BOTH the seed time + the rollover time explicitly so this
+    // test is invariant to whatever date the real clock says.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-20T10:00:00.000Z'));
+    // _reset rebuilds dayKey from "now" — must happen under fake time.
+    _resetQuotaForTests(10_000);
     consume(100, '/videos');
     expect(snapshot().consumed).toBe(100);
 
-    // Simulate the day rolling by mocking Date.toISOString. We use
-    // vi.setSystemTime so the next consume() call sees a new day.
-    vi.useFakeTimers();
+    // Roll to the next UTC day. The next consume() triggers the reset
+    // path; the counter becomes 0 + new units.
     vi.setSystemTime(new Date('2026-05-21T00:00:00.000Z'));
-    // First call AFTER the roll triggers the reset path; the counter
-    // becomes 0 + new units.
     consume(5, '/videos');
     expect(snapshot().consumed).toBe(5);
     vi.useRealTimers();

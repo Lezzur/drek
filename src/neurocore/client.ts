@@ -4,6 +4,7 @@ import { NeurocoreError, isRetryable, type NeurocoreErrorCode } from './errors.j
 import type {
   ApprovedScriptSignal,
   ContentCatalogCreatePayload,
+  ContentCatalogListEntry,
   ContentCatalogResponse,
   MemoryContextResponse,
   PendingListing,
@@ -224,6 +225,64 @@ export class NeurocoreClient {
       '/v1/content-catalog',
       payload,
       { idempotencyKey: `drek-content-catalog-${payload.deliverableId}` },
+    );
+  }
+
+  /**
+   * List ContentCatalog entries — used by the nightly
+   * refresh-stack-performance cron to iterate every published video
+   * and aggregate analytics per tech stack. Defaults sourceApp=drek so
+   * the cron only sees what DREK published (future apps may publish too).
+   */
+  async listContentCatalog(opts?: {
+    primaryTechStackId?: string;
+    audienceProfileId?: string;
+    limit?: number;
+  }): Promise<{ profiles: ContentCatalogListEntry[] }> {
+    const params = new URLSearchParams({ sourceApp: 'drek' });
+    if (opts?.primaryTechStackId) params.set('primaryTechStackId', opts.primaryTechStackId);
+    if (opts?.audienceProfileId) params.set('audienceProfileId', opts.audienceProfileId);
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    const data = await this.requestJson<{ profiles: ContentCatalogListEntry[] }>(
+      'GET',
+      `/v1/content-catalog?${params.toString()}`,
+      null,
+    );
+    if (!Array.isArray(data.profiles)) {
+      throw new NeurocoreError(
+        'INVALID_RESPONSE',
+        '/v1/content-catalog',
+        'response missing profiles array',
+      );
+    }
+    return data;
+  }
+
+  /**
+   * Upsert a StackPerformance row. Called by the nightly
+   * refresh-stack-performance cron — one POST per active tech stack.
+   * Idempotency-key carries the date so re-running the cron same-day
+   * (manual retrigger) doesn't bounce off the 24h idempotency window
+   * with a stale response.
+   */
+  async createStackPerformance(payload: {
+    id: string;
+    techStackProfileId: string;
+    videoCount: number;
+    avgViews: number;
+    avgWatchTimeSeconds: number;
+    avgCtr: number;
+    totalRevenueUsd: number | null;
+    lastVideoPublishedAt: string | null;
+  }): Promise<{ entry: unknown }> {
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    return this.requestJson<{ entry: unknown }>(
+      'POST',
+      '/v1/stack-performance',
+      payload,
+      {
+        idempotencyKey: `drek-stack-performance-${payload.id}-${todayUtc}`,
+      },
     );
   }
 

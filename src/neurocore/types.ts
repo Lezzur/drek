@@ -109,3 +109,23 @@ export interface ContentCatalogResponse {
   };
   created: boolean;
 }
+
+/** ContentCatalog list-row shape — fields the nightly cron needs to
+ *  re-aggregate. Mirrors the Neurocore ContentCatalog schema. */
+export interface ContentCatalogListEntry {
+  id: string;
+  deliverableId: string;
+  planId: string;
+  kind: 'long_form' | 'short_clip' | 'lead_magnet';
+  title: string;
+  youtubeUrl: string;
+  youtubeVideoId: string;
+  audienceProfileId: string;
+  primaryTechStackId: string;
+  supportingTechStackIds: string[];
+  topicTags: string[];
+  publishedAt: string;
+  sourceApp: 'drek';
+  createdAt: string;
+  updatedAt: string;
+}

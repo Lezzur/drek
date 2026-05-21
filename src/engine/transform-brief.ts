@@ -22,6 +22,10 @@ import {
   getAudienceProfileClient,
   type AudienceProfile,
 } from '../neurocore/audience-profiles.js';
+import {
+  getStackPerformanceClient,
+  type StackPerformance,
+} from '../neurocore/stack-performance.js';
 import { scoreBriefViaLLM } from '../intake/scoring.js';
 import { IntakeError } from '../intake/errors.js';
 
@@ -128,6 +132,7 @@ function buildPrompt(
   rawScore: BriefScore,
   audience: AudienceProfile,
   techStacks: TechStackProfile[],
+  channelHistory: StackPerformance[],
 ): string {
   const catalog = techStacks
     .map(
@@ -149,6 +154,8 @@ function buildPrompt(
   scopeFit:       ${rawScore.scopeFit}/5  (must preserve)
   audienceMatch:  ${rawScore.audienceMatch}/5  (must preserve)`;
 
+  const historyBlock = buildChannelHistoryBlock(channelHistory, techStacks);
+
   return [
     SYSTEM_HEADER,
     '',
@@ -156,6 +163,8 @@ function buildPrompt(
     '',
     'TECH STACK CATALOG (pick primary + supporting ONLY from this list):',
     catalog,
+    '',
+    historyBlock,
     '',
     scoreBlock,
     '',
@@ -167,6 +176,44 @@ function buildPrompt(
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
+}
+
+/**
+ * CHANNEL HISTORY block — populated from Neurocore StackPerformance once
+ * Rick's channel has at least one published video. Until then, the
+ * empty-data fallback tells the LLM there's no signal to bias toward.
+ *
+ * Tie-break rule encodes Rick's instruction from spec discussion:
+ * popular stacks STAY popular because that's what audiences want; only
+ * NICHE stacks get the "give the underdog a shot" treatment.
+ */
+function buildChannelHistoryBlock(
+  history: StackPerformance[],
+  techStacks: TechStackProfile[],
+): string {
+  if (history.length === 0) {
+    return [
+      'CHANNEL HISTORY (inform, don\'t avoid):',
+      '  (no data yet — pick the best technical fit; coverage rotation activates after the first published video).',
+    ].join('\n');
+  }
+  const tierById = new Map(techStacks.map((t) => [t.id, t.popularityTier]));
+  const lines = history
+    .slice() // copy before sort
+    .sort((a, b) => b.avgViews - a.avgViews)
+    .slice(0, 10) // cap the block — 10 rows is plenty of signal
+    .map((h) => {
+      const tier = tierById.get(h.techStackProfileId) ?? 'unknown';
+      const views = Math.round(h.avgViews);
+      const ctr = h.avgCtr.toFixed(1);
+      return `  ${h.techStackProfileId}: ${h.videoCount} videos, avg ${views} views, ${ctr}% CTR — ${tier}`;
+    });
+  return [
+    'CHANNEL HISTORY (inform, don\'t avoid):',
+    ...lines,
+    '',
+    "TIE-BREAK RULE: When two stacks fit equally, prefer the one with fewer videos UNLESS it's marked 'niche' — for niche stacks, always weigh against view counts. Never penalize a mainstream stack for being popular.",
+  ].join('\n');
 }
 
 type ParseOutcome =
@@ -240,10 +287,14 @@ export async function transformBrief(
     );
   }
 
-  // Fetch the catalog + audience profile in parallel (independent calls).
-  const [techStacks, audience] = await Promise.all([
+  // Fetch the catalog + audience profile + channel history in parallel.
+  // History is best-effort: an empty array or a failed Neurocore call
+  // just means the LLM gets the "no data yet" fallback. We never block
+  // a transform on history availability.
+  const [techStacks, audience, channelHistory] = await Promise.all([
     getTechStackProfileClient().list({ status: 'active' }),
     getAudienceProfileClient().get(SHORTS_AUDIENCE_ID),
+    loadChannelHistoryBestEffort(),
   ]);
 
   if (techStacks.length === 0) {
@@ -255,7 +306,7 @@ export async function transformBrief(
   }
 
   const rawScore = brief.score;
-  const prompt = buildPrompt(brief, rawScore, audience, techStacks);
+  const prompt = buildPrompt(brief, rawScore, audience, techStacks, channelHistory);
 
   let result: LLMTransformOutput;
   let retried = false;
@@ -473,4 +524,26 @@ async function scoreBriefByText(
     { title: input.title, company: input.company, text: input.text },
     opts,
   );
+}
+
+/**
+ * Channel-history loader (M31). Returns the StackPerformance list, or
+ * an empty array when Neurocore is unreachable / hasn't been seeded yet.
+ * We swallow ALL failures here intentionally — coverage rotation is a
+ * nice-to-have for the transformer, not a hard dependency. The "no data
+ * yet" fallback in the prompt is the same string the LLM sees when
+ * history truly is empty, so the LLM can't distinguish "missing because
+ * Neurocore is down" from "missing because channel is new" — that's by
+ * design (degrade silently).
+ */
+async function loadChannelHistoryBestEffort(): Promise<StackPerformance[]> {
+  try {
+    return await getStackPerformanceClient().list();
+  } catch (err) {
+    logger.warn(
+      { err: (err as Error).message },
+      'transform-brief: stack-performance fetch failed, prompting with empty history',
+    );
+    return [];
+  }
 }

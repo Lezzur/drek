@@ -7,6 +7,8 @@ import { startScheduler } from './lib/scheduler.js';
 import { refreshModelCatalog } from './models/catalog.js';
 import { makePollingJob } from './polling/service.js';
 import { initializeWriteQueue } from './neurocore/write-queue.js';
+import { refreshStackPerformance } from './cron/refresh-stack-performance.js';
+import { dailyAt } from './lib/scheduler.js';
 
 const env = getEnv();
 const app = createApp();
@@ -47,6 +49,23 @@ serve(
           run: async () => { await refreshModelCatalog(); },
         },
         makePollingJob(),
+        // 04:00 UTC = quiet hours. Aggregates YouTube analytics into
+        // Neurocore StackPerformance once a day. Best-effort: errors
+        // are logged, never escalate to taking down the service.
+        {
+          name: 'refresh-stack-performance',
+          matches: dailyAt(4, 0),
+          run: async () => {
+            try {
+              await refreshStackPerformance();
+            } catch (err) {
+              logger.warn(
+                { err: (err as Error).message },
+                'refresh-stack-performance failed (next run in 24h)',
+              );
+            }
+          },
+        },
       ]);
 
       // One-shot startup refresh ~30s after boot so the catalog populates on

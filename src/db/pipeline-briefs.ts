@@ -90,6 +90,8 @@ export interface ListBriefsOpts {
   sortBy?: BriefSort;
 }
 
+// FIRESTORE-INDEX: pipeline_briefs(stage:ASC, updatedAt:DESC)
+// FIRESTORE-INDEX: pipeline_briefs(stage:ASC, score.aggregate:DESC)
 export async function listPipelineBriefs(
   opts: ListBriefsOpts = {},
   db: Firestore = getDb(),
@@ -144,6 +146,7 @@ export async function getPipelineBriefByPromotedPlanId(
  * List all briefs that share a batchId, oldest-first by insertion order.
  * Used by the batch-intake overview page to render the row list.
  */
+// FIRESTORE-INDEX: pipeline_briefs(batchId:ASC, createdAt:ASC)
 export async function listBriefsByBatchId(
   batchId: string,
   db: Firestore = getDb(),

@@ -95,6 +95,9 @@ export interface ListPlansFilter {
   cursor?: string;
 }
 
+// FIRESTORE-INDEX: plans(type:ASC, createdAt:DESC)
+// FIRESTORE-INDEX: plans(status:ASC, createdAt:DESC)
+// FIRESTORE-INDEX: plans(type:ASC, status:ASC, createdAt:DESC)
 export async function listPlans(
   filter: ListPlansFilter = {},
   db: Firestore = getDb(),

@@ -65,6 +65,7 @@ export interface ListListingsFilter {
   limit?: number;
 }
 
+// FIRESTORE-INDEX: available_listings(planId:ASC, receivedAt:DESC)
 export async function listListings(
   filter: ListListingsFilter = {},
   db: Firestore = getDb(),

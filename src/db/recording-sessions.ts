@@ -58,6 +58,7 @@ export async function logRecordingSession(
   return docToSession(id, doc);
 }
 
+// FIRESTORE-INDEX: recording_sessions(planId:ASC, dateRecorded:DESC)
 export async function listSessionsForPlan(
   planId: string,
   db: Firestore = getDb(),

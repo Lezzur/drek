@@ -12,6 +12,7 @@ Specs live next to the code:
 - [`TECH-SPEC-drek-2026-05-15.md`](./TECH-SPEC-drek-2026-05-15.md) — v1 architecture, milestones
 - [`PRD-drek-v2-youtube-2026-05-18.md`](./PRD-drek-v2-youtube-2026-05-18.md) — v2 YouTube channel operating system
 - [`TECH-SPEC-drek-v2-youtube-2026-05-18.md`](./TECH-SPEC-drek-v2-youtube-2026-05-18.md) — v2 architecture, 9 module additions
+- [`TECH-SPEC-drek-v2.1-content-substrate-2026-05-19.md`](./TECH-SPEC-drek-v2.1-content-substrate-2026-05-19.md) — v2.1 cross-app content substrate, Brief Transformer, YouTube client
 - [`CHANGELOG.md`](./CHANGELOG.md) — release notes
 
 ## Stack

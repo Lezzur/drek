@@ -2,6 +2,108 @@
 
 All notable changes to DREK are documented here.
 
+## v2.1.0 — 2026-05-21
+
+DREK v2.1: content substrate. Turns DREK from "one-channel pre-production"
+into the first writer for a cross-app content layer. Three new shared
+entities in Neurocore (`TechStackProfile`, `ContentCatalog`, `StackPerformance`),
+batch brief intake, a Brief Transformer that lifts 3.0+ briefs to 5.0-grade,
+and the YouTube read-only client that feeds analytics back into the loop.
+See [`TECH-SPEC-drek-v2.1-content-substrate-2026-05-19.md`](./TECH-SPEC-drek-v2.1-content-substrate-2026-05-19.md)
+for the design.
+
+### Added
+
+- **Batch intake (M25)** — multi-row form at `/intake/batch/new` accepting
+  up to 25 briefs in one paste. Parallel LLM scoring with 3-call
+  concurrency, persist-first semantics, atomic Firestore batch write,
+  HTMX polling on the overview page.
+- **TechStackProfile (M26)** — Neurocore-hosted catalog of build
+  technologies. Replaces DREK's local TypeScript constants. DREK reads
+  on transform via `src/neurocore/tech-stacks.ts`; seeds shipped with
+  the Neurocore repo (10 stacks: vapi, retell, n8n, zapier, make,
+  claude_code_cli, cursor, supabase, firebase, twilio).
+- **Intake list UX (M26.5)** — multi-select checkboxes + score column +
+  status column on `/intake`. Bulk retire/delete actions with 50-row cap.
+- **Brief Transformer / Call 11.5 (M29)** — `POST /intake/:briefId/transform`
+  promotes briefs with strong technical fit (scopeFit + audienceMatch ≥ 3.5)
+  but weak narrative axes (visualOutcome < 3.0 OR storyPotential < 3.0)
+  into 5.0-grade briefs. LLM rewrites the brief, pins a tech stack from
+  the Neurocore registry, then re-scores via Call 11. Drift detection
+  warns when the transformer rewrites facts vs framing.
+- **ContentCatalog (M27 + M28)** — one shared record per published
+  Deliverable in Neurocore, queryable by Nami's outreach, the website
+  portfolio, lead-qualification, and future apps. DREK writes on publish
+  via a durable in-process queue (`src/neurocore/write-queue.ts`) backed
+  by `$WORKSPACE_ROOT/.neurocore-queue.jsonl` so a service restart doesn't
+  lose writes. Exponential backoff, dead-letter after 5 attempts.
+- **YouTube client (M30)** — read-only `src/youtube/` module wraps Data
+  + Analytics APIs. OAuth refresh-token flow with in-memory access-token
+  cache, automatic 401 rotation, per-process quota counter (warns at 80%,
+  refuses at 95%), empty-channel graceful handling for brand-new channels.
+- **StackPerformance (M31)** — Neurocore entity capturing per-tech-stack
+  aggregated metrics (videoCount, avgViews, avgWatchTimeSeconds, avgCtr).
+  Nightly DREK cron `src/cron/refresh-stack-performance.ts` runs at 04:00
+  UTC, iterates ContentCatalog, pulls YouTube analytics, aggregates by
+  primaryTechStackId, upserts the registry. Brief Transformer prompt picks
+  up the resulting CHANNEL HISTORY block + Rick's tie-break rule (popular
+  stacks STAY popular; only niche stacks get the underdog bias).
+- **Healthz expansions** — `/healthz` now surfaces `neurocoreWriteQueueDepth`,
+  `neurocoreDeadLetterCount`, `youtube` configured state, and
+  `youtubeQuotaUtilization`. Soft signals; never flip the response to 503.
+
+### Schema (additive)
+
+```typescript
+// PipelineBrief — four new nullable fields, no migration needed:
+batchId: string | null = null;
+transformedBriefText: string | null = null;
+transformedScore: BriefScore | null = null;
+pinnedTechStack: { primary, supporting[], rationale } | null = null;
+```
+
+Three new top-level Neurocore collections: `tech_stack_profiles`,
+`content_catalog`, `stack_performance`. All read-restricted to authenticated
+apps; writes admin-only (TechStackProfile) or DREK-only (ContentCatalog,
+StackPerformance).
+
+### Required env vars (additive)
+
+```
+YOUTUBE_CLIENT_ID        # OAuth client (Web application type)
+YOUTUBE_CLIENT_SECRET    # OAuth secret
+YOUTUBE_REFRESH_TOKEN    # Mint via OAuth Playground (one-time)
+YOUTUBE_CHANNEL_ID       # UC... — find at studio.youtube.com → Settings
+YOUTUBE_DAILY_QUOTA      # Optional, default 10_000
+YOUTUBE_TIMEOUT_MS       # Optional, default 30_000
+```
+
+A verification script is included: `npx tsx scripts/verify-youtube-oauth.ts`.
+
+### Firestore indexes (DREK)
+
+```json
+{ "collectionGroup": "pipeline_briefs", "fields": [
+    { "fieldPath": "batchId", "order": "ASCENDING" },
+    { "fieldPath": "createdAt", "order": "ASCENDING" }
+] }
+```
+
+Deploy with `firebase deploy --only firestore:indexes`.
+
+### Firestore indexes (Neurocore)
+
+Three composite indexes on `content_catalog`:
+- `(sourceApp, publishedAt DESC)` — recent activity feed
+- `(primaryTechStackId, publishedAt DESC)` — per-stack lookups
+- `(audienceProfileId, publishedAt DESC)` — per-audience lookups
+
+### Migration
+
+None — every schema change is additive with `null` defaults. Existing
+v2.0 briefs/plans/deliverables continue to work; M29's Transform button
+just doesn't show up for them (no pinnedTechStack on the source brief).
+
 ## v2.0.0 — 2026-05-18
 
 DREK v2: YouTube Channel Operating System. Extends DREK from "writes

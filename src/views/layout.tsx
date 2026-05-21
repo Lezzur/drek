@@ -129,6 +129,8 @@ h3.section-label {
   font: 500 14px/1 inherit;
   cursor: pointer;
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .btn:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); text-decoration: none; color: var(--bg); }
 .btn.secondary { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
@@ -189,7 +191,7 @@ button.btn { font-family: inherit; }
   border-radius: 10px;
 }
 form.inline { display: block; width: 100%; margin: 0; }
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="url"], select {
   padding: 9px 12px;
   border: 1px solid var(--border-strong);
   border-radius: 7px;
@@ -198,7 +200,7 @@ input[type="text"], input[type="number"], select {
   background: var(--input-bg);
   color: var(--ink);
 }
-input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="url"]:focus, select:focus, textarea:focus {
   border-color: var(--link);
   outline: none;
   box-shadow: 0 0 0 3px rgba(26,95,180,0.12);

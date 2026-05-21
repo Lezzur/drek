@@ -29,7 +29,8 @@ describe('NewCoverLetterPlanPage', () => {
         },
       }),
     );
-    expect(html).toContain('Pre-filled from available listing');
+    // Prefill copy now names the listing id inline: "Pre-filled from listing <id>".
+    expect(html).toContain('Pre-filled from');
     expect(html).toContain('lst_42');
     expect(html).toContain('Backend Eng at Acme');
     expect(html).toContain('The full listing text here.');

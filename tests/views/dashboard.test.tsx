@@ -39,7 +39,9 @@ describe('DashboardPage', () => {
       DashboardPage({ plans: [], filter: {}, lastPollAt: null }),
     );
     expect(html).toContain('<title>Dashboard');
-    expect(html).toContain('DREK · AI Video Director');
+    // Title element now uses "—" delimiter and just "DREK" — the
+    // "AI Video Director" sub-brand moved to the marketing site copy.
+    expect(html).toMatch(/<title>Dashboard\s+—\s+DREK<\/title>/);
   });
 
   it('shows the empty-state message when no plans match', async () => {
@@ -84,7 +86,7 @@ describe('DashboardPage', () => {
         lastPollAt: null,
       }),
     );
-    expect(html).toMatch(/<option value="youtube_lite" selected[^>]*>YouTube<\/option>/);
+    expect(html).toMatch(/<option value="youtube_lite" selected[^>]*>YouTube \(lite\)<\/option>/);
     expect(html).toMatch(/<option value="projects_matched" selected[^>]*>Projects matched<\/option>/);
   });
 

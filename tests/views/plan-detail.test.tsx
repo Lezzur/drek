@@ -102,8 +102,10 @@ describe('PlanDetailPage', () => {
         scenes: [],
       }),
     );
-    expect(html).toContain('Requirements (1)');
-    expect(html).toContain('MUST');
+    // Header copy migrated from "Requirements (1)" to "Requirements · 1 extracted".
+    expect(html).toContain('Requirements · 1 extracted');
+    // Priority pill copy is now title-case "Must" (was ALLCAPS "MUST").
+    expect(html).toContain('Must');
     expect(html).toContain('lead pipeline automation');
     expect(html).toContain('evidence here');
   });
@@ -126,7 +128,8 @@ describe('PlanDetailPage', () => {
         scenes: [],
       }),
     );
-    expect(html).toContain('Matched projects (1)');
+    // Header copy migrated from "Matched projects (1)" to "Matched projects · 1 selected".
+    expect(html).toContain('Matched projects · 1 selected');
     expect(html).toContain('Lead Pipeline');
     expect(html).toContain('routing dashboard');
     expect(html).toContain('0.92');
@@ -162,32 +165,35 @@ describe('PlanDetailPage', () => {
     expect(html).not.toContain('1. Analyze requirements');
   });
 
-  it('disables actions when plan status forbids them', () => {
-    // awaiting_review: can analyze, can NOT match (no requirements yet), can NOT generate.
+  it('shows the Run pipeline button on a plan in awaiting_review', () => {
+    // The three separate per-step buttons (Analyze / Match / Generate scenes)
+    // collapsed into a single "Run pipeline" action in v2. Disabled-ness is
+    // driven by status; here we just confirm the button renders.
     const html = toHtml(
       PlanDetailPage({ plan: fakePlan({ status: 'awaiting_review' }), scenes: [] }),
     );
-    // We render disabled with a presence flag — check the strings.
-    expect(html).toContain('Analyze requirements');
-    expect(html).toContain('Match projects');
-    expect(html).toContain('Generate scenes + scripts');
+    expect(html).toContain('Run pipeline');
+    expect(html).toContain('hx-post="/plans/plan_1/run"');
   });
 });
 
 describe('RuntimeBar', () => {
+  // Colors moved from hard-coded hex to CSS variables (--green-fg /
+  // --amber-fg / --danger) so dark mode + theming Just Work. Tests assert
+  // on the variable name now instead of the resolved value.
   it('green styling within 15% of target', () => {
     const html = toHtml(RuntimeBar({ targetSeconds: 120, estimatedSeconds: 115 }));
-    expect(html).toContain('#1c7a32');
+    expect(html).toContain('var(--green-fg)');
   });
 
   it('yellow styling between 15% and 30% off', () => {
     const html = toHtml(RuntimeBar({ targetSeconds: 120, estimatedSeconds: 90 }));
-    expect(html).toContain('#a06b00');
+    expect(html).toContain('var(--amber-fg)');
   });
 
   it('red styling beyond 30% off', () => {
     const html = toHtml(RuntimeBar({ targetSeconds: 120, estimatedSeconds: 50 }));
-    expect(html).toContain('#a01b1b');
+    expect(html).toContain('var(--danger)');
   });
 
   it('handles zero target gracefully', () => {

@@ -145,7 +145,9 @@ describe('ShootInstructionsPage', () => {
         stale: false,
       }),
     );
-    expect(html).toContain('Total estimated runtime: 110s');
+    // HTML summary line condensed from "Total estimated runtime: 110s"
+    // to "Total: 110s estimated · Target: 120s" so it fits one row.
+    expect(html).toContain('Total: 110s estimated');
     expect(html).toContain('Target: 120s');
   });
 

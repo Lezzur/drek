@@ -1,24 +1,22 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// Mock the env module so we can flip LLM_PROVIDER per test without polluting
-// process.env. The factory calls getEnv() lazily, so the mock is in place by
-// the time it runs.
-const fakeEnv = {
-  PORT: 3003,
-  NODE_ENV: 'test' as const,
-  GCP_PROJECT_ID: 'drek-test',
-  LOG_LEVEL: 'silent' as const,
-  LLM_PROVIDER: 'claude' as 'claude' | 'codex',
-  LLM_TIMEOUT_MS: 120_000,
-  CLAUDE_BIN: 'claude',
-  CLAUDE_MODEL: 'claude-sonnet-4-5',
-  CODEX_BIN: 'codex',
-  CODEX_MODEL: 'gpt-5-codex',
+/**
+ * The factory used to read LLM_PROVIDER straight off env and memoize globally.
+ * It now reads from src/db/llm-settings.js (which has its own 30s cache) and
+ * memoizes per-provider-name, so both providers can coexist in the Map.
+ *
+ * These tests stub out llm-settings to control what the factory sees.
+ */
+
+const fakeSettings = {
+  provider: 'claude' as 'claude' | 'codex',
+  claudeModel: 'claude-sonnet-4-5',
+  codexModel: 'gpt-5-codex',
 };
 
-vi.mock('../../src/env.js', () => ({
-  getEnv: () => fakeEnv,
-  loadEnv: () => fakeEnv,
+vi.mock('../../src/db/llm-settings.js', () => ({
+  getLLMSettings: vi.fn(async () => ({ ...fakeSettings })),
+  _resetLLMSettingsCacheForTests: vi.fn(),
 }));
 
 import {
@@ -29,42 +27,49 @@ import {
 describe('getLLMProvider', () => {
   beforeEach(() => {
     _resetProviderForTests();
+    fakeSettings.provider = 'claude';
   });
 
-  it('returns a ClaudeCLIProvider when LLM_PROVIDER=claude', () => {
-    fakeEnv.LLM_PROVIDER = 'claude';
-    const p = getLLMProvider();
+  it('returns a ClaudeCLIProvider when settings.provider=claude', async () => {
+    fakeSettings.provider = 'claude';
+    const p = await getLLMProvider();
     expect(p.name).toBe('claude');
   });
 
-  it('returns a CodexCLIProvider when LLM_PROVIDER=codex', () => {
-    fakeEnv.LLM_PROVIDER = 'codex';
-    const p = getLLMProvider();
+  it('returns a CodexCLIProvider when settings.provider=codex', async () => {
+    fakeSettings.provider = 'codex';
+    const p = await getLLMProvider();
     expect(p.name).toBe('codex');
   });
 
-  it('memoizes — the same instance comes back across calls', () => {
-    fakeEnv.LLM_PROVIDER = 'claude';
-    const a = getLLMProvider();
-    const b = getLLMProvider();
+  it('memoizes — the same instance comes back across calls with the same provider', async () => {
+    fakeSettings.provider = 'claude';
+    const a = await getLLMProvider();
+    const b = await getLLMProvider();
     expect(a).toBe(b);
   });
 
-  it('switching LLM_PROVIDER after first call has no effect without reset', () => {
-    fakeEnv.LLM_PROVIDER = 'claude';
-    const first = getLLMProvider();
-    fakeEnv.LLM_PROVIDER = 'codex';
-    const second = getLLMProvider();
-    expect(second.name).toBe('claude'); // still claude — cache won
-    expect(second).toBe(first);
+  it('memoizes per-provider-name — switching settings hands back the other cached instance', async () => {
+    fakeSettings.provider = 'claude';
+    const first = await getLLMProvider();
+    fakeSettings.provider = 'codex';
+    const second = await getLLMProvider();
+    // Different instances — the Map keys by provider name now, so both
+    // providers coexist instead of one winning the cache forever.
+    expect(second.name).toBe('codex');
+    expect(second).not.toBe(first);
+    // Switching back returns the original Claude instance.
+    fakeSettings.provider = 'claude';
+    const third = await getLLMProvider();
+    expect(third).toBe(first);
   });
 
-  it('_resetProviderForTests clears the cache so a new provider can be selected', () => {
-    fakeEnv.LLM_PROVIDER = 'claude';
-    getLLMProvider();
+  it('_resetProviderForTests clears both instances; next call rebuilds fresh', async () => {
+    fakeSettings.provider = 'claude';
+    const original = await getLLMProvider();
     _resetProviderForTests();
-    fakeEnv.LLM_PROVIDER = 'codex';
-    const after = getLLMProvider();
-    expect(after.name).toBe('codex');
+    const rebuilt = await getLLMProvider();
+    expect(rebuilt.name).toBe('claude');
+    expect(rebuilt).not.toBe(original);
   });
 });

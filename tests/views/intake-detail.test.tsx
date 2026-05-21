@@ -425,3 +425,37 @@ describe('BriefDetailPage — score edit form reason field (M35)', () => {
     expect(html).toContain('score.overridden');
   });
 });
+
+describe('BriefDetailPage — Transform/Re-transform loading spinner (M35.1)', () => {
+  it('Transform button wires hx-indicator + hx-disabled-elt to the spinner span', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({ score: transformableScore() }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    expect(html).toContain('hx-indicator="#transform-indicator-brief_abc"');
+    expect(html).toContain('id="transform-indicator-brief_abc"');
+    expect(html).toContain('hx-disabled-elt="this"');
+    // Spinner class (not just text) so the .score-spinner CSS rule animates it.
+    expect(html).toMatch(/score-spinner htmx-indicator[^>]*id="transform-indicator-brief_abc"/);
+  });
+
+  it('Re-transform button wires hx-indicator + hx-disabled-elt to the spinner span', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({
+          score: transformableScore(),
+          transformedBuildPlan: samplePlan(),
+          pinnedTechStack: { primary: 'tech_vapi', supporting: [], rationale: 'r' },
+        }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    expect(html).toContain('hx-indicator="#retransform-indicator-brief_abc"');
+    expect(html).toContain('id="retransform-indicator-brief_abc"');
+    expect(html).toMatch(/score-spinner htmx-indicator[^>]*id="retransform-indicator-brief_abc"/);
+  });
+});

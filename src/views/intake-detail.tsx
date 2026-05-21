@@ -202,10 +202,17 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
             hx-target="body"
             hx-swap="outerHTML"
             hx-confirm="Transform this brief into a build plan? The LLM will derive goal + toolchain + build steps + shots. ~60-120s."
+            hx-indicator={`#transform-indicator-${brief.id}`}
+            hx-disabled-elt="this"
           >
             Transform → build plan
           </button>
-          <span class="muted htmx-indicator" style="margin-left:10px; font-size:13px;">Transforming… (~60-120s)</span>
+          <span
+            class="score-spinner htmx-indicator"
+            id={`transform-indicator-${brief.id}`}
+          >
+            Transforming… (~60-120s)
+          </span>
         </div>
       ) : null}
 
@@ -476,10 +483,17 @@ const TransformPanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
           hx-target="body"
           hx-swap="outerHTML"
           hx-confirm="Re-transform this brief? The current build plan and tech-stack pick will be overwritten."
+          hx-indicator={`#retransform-indicator-${brief.id}`}
+          hx-disabled-elt="this"
         >
           Re-transform
         </button>
-        <span class="muted htmx-indicator" style="font-size:13px;">Transforming… (~60-120s)</span>
+        <span
+          class="score-spinner htmx-indicator"
+          id={`retransform-indicator-${brief.id}`}
+        >
+          Transforming… (~60-120s)
+        </span>
       </div>
       <script
         dangerouslySetInnerHTML={{

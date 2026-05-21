@@ -200,6 +200,12 @@ input[type="text"], input[type="number"], input[type="url"], select {
   background: var(--input-bg);
   color: var(--ink);
 }
+input:-webkit-autofill, input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0px 1000px var(--input-bg) inset;
+  -webkit-text-fill-color: var(--ink);
+}
+input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
 input[type="text"]:focus, input[type="number"]:focus, input[type="url"]:focus, select:focus, textarea:focus {
   border-color: var(--link);
   outline: none;
@@ -347,29 +353,11 @@ table.plans .col-runtime { text-align: right; font-variant-numeric: tabular-nums
 .htmx-indicator { display: none; }
 .htmx-request.htmx-indicator { display: inline; }
 button.btn.htmx-request { opacity: 0.55; cursor: wait; pointer-events: none; }
+button.btn[disabled] { opacity: 0.55; cursor: wait; pointer-events: none; }
 @keyframes drek-spin { to { transform: rotate(360deg); } }
-/* Score / re-score spinner — replaces the verbose "(~15-30s)" inline hint
-   with a compact animated dot. Wired to btn[hx-indicator=#score-indicator]
-   and btn[hx-indicator=#rescore-indicator] via the htmx-indicator class. */
-.score-spinner {
-  display: none;
-  margin-left: 10px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.score-spinner::before {
-  content: '';
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
-  border: 1.5px solid var(--ink-3);
-  border-top-color: var(--accent, var(--ink));
-  border-radius: 50%;
-  vertical-align: -1px;
-  animation: drek-spin 0.8s linear infinite;
-}
-.htmx-request.score-spinner { display: inline-flex; align-items: center; }
+.score-spinner { display: none; align-items: center; gap: 6px; margin-left: 10px; font-size: 13px; color: var(--ink-3); vertical-align: middle; }
+.score-spinner.htmx-request { display: inline-flex; }
+.score-spinner::before { content: ''; flex-shrink: 0; width: 12px; height: 12px; border: 2px solid rgba(122,120,114,0.25); border-top-color: var(--ink-3); border-radius: 50%; animation: drek-spin 0.75s linear infinite; }
 .pipeline-indicator {
   display: none;
   align-items: center;
@@ -507,6 +495,7 @@ export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=1280" />
         <title>{title} — DREK</title>
+        <link rel="icon" type="image/jpeg" href="data:image/jpeg;base64,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" />
         <style dangerouslySetInnerHTML={{ __html: STYLES }} />
         <script src={HTMX_CDN}></script>
       </head>
@@ -516,6 +505,7 @@ export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
             <a href="/" class="brand">DREK</a>
             <nav>
               <a href="/">Dashboard</a>
+              <a href="/intake">Intake</a>
               <a href="/listings">Available listings</a>
               <a href="/settings">Settings</a>
             </nav>

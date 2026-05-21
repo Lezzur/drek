@@ -212,13 +212,9 @@ const BriefListHeader: FC = () => {
     <div
       style={`display:grid; ${COL_GRID} padding:8px 16px; margin-bottom:6px; font-size:11px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.05em;`}
     >
-      <div style="text-align:center;">
-        <input
-          type="checkbox"
-          id="brief-select-all"
-          style="width:18px; height:18px; cursor:pointer;"
-        />
-      </div>
+      {/* First column is the per-row checkbox in BriefRow; header leaves
+          it intentionally empty (no select-all — per Rick 2026-05-22). */}
+      <div />
       <div>Brief</div>
       <div style="text-align:center;">Score</div>
       <div style="text-align:center;">Status</div>
@@ -228,14 +224,17 @@ const BriefListHeader: FC = () => {
 };
 
 /**
- * Bulk-action bar shown when ≥1 brief is selected. Hidden by default; the
- * inline script below shows/hides it based on checkbox state.
+ * Bulk-action bar. Reserves vertical space whether or not anything is
+ * selected — visibility toggles via opacity + pointer-events so the
+ * page below doesn't shift when the first checkbox flips on. The
+ * inline script also handles shift-click range selection between two
+ * .brief-select checkboxes.
  */
 const BulkActionBar: FC = () => {
   return (
     <div
       id="bulk-action-bar"
-      style="display:none; position:sticky; top:0; z-index:10; background:var(--surface-raised); border:1px solid var(--border-strong); border-radius:8px; padding:10px 14px; margin-bottom:12px; align-items:center; gap:12px;"
+      style="display:flex; visibility:hidden; opacity:0; transition:opacity 0.12s ease-in-out; position:sticky; top:0; z-index:10; background:var(--surface-raised); border:1px solid var(--border-strong); border-radius:8px; padding:10px 14px; margin-bottom:12px; align-items:center; gap:12px;"
     >
       <span style="font-weight:600;">
         <span id="bulk-selected-count">0</span> selected
@@ -264,30 +263,51 @@ const BULK_SCRIPT = `
 (function () {
   var bar = document.getElementById('bulk-action-bar');
   var counter = document.getElementById('bulk-selected-count');
-  var selectAll = document.getElementById('brief-select-all');
   if (!bar || !counter) return;
 
+  function allBoxes() {
+    return Array.prototype.slice.call(document.querySelectorAll('.brief-select'));
+  }
   function selectedIds() {
-    var boxes = document.querySelectorAll('.brief-select:checked');
-    return Array.prototype.map.call(boxes, function (b) { return b.value; });
+    return allBoxes().filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
   }
   function refresh() {
     var ids = selectedIds();
     counter.textContent = ids.length;
-    bar.style.display = ids.length > 0 ? 'flex' : 'none';
+    // Toggle via visibility + opacity (NOT display) so the bar's space
+    // is always reserved — clicking the first checkbox doesn't shift
+    // the list down.
+    if (ids.length > 0) {
+      bar.style.visibility = 'visible';
+      bar.style.opacity = '1';
+      bar.style.pointerEvents = 'auto';
+    } else {
+      bar.style.visibility = 'hidden';
+      bar.style.opacity = '0';
+      bar.style.pointerEvents = 'none';
+    }
   }
 
-  document.querySelectorAll('.brief-select').forEach(function (cb) {
-    cb.addEventListener('change', refresh);
-  });
-  if (selectAll) {
-    selectAll.addEventListener('change', function () {
-      document.querySelectorAll('.brief-select').forEach(function (cb) {
-        cb.checked = selectAll.checked;
-      });
+  // Shift-click range select: remember the last checkbox that the user
+  // clicked. On the next click WITH shift held, toggle every box between
+  // the anchor and the new click to match the new click's target state.
+  var lastChecked = null;
+  allBoxes().forEach(function (cb) {
+    cb.addEventListener('click', function (ev) {
+      var boxes = allBoxes();
+      if (ev.shiftKey && lastChecked && lastChecked !== cb) {
+        var start = boxes.indexOf(lastChecked);
+        var end = boxes.indexOf(cb);
+        if (start > -1 && end > -1) {
+          var lo = Math.min(start, end), hi = Math.max(start, end);
+          var target = cb.checked; // match the box the user just clicked
+          for (var i = lo; i <= hi; i++) boxes[i].checked = target;
+        }
+      }
+      lastChecked = cb;
       refresh();
     });
-  }
+  });
 
   bar.addEventListener('click', function (ev) {
     var btn = ev.target;

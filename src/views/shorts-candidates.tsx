@@ -100,7 +100,6 @@ const CandidateCard: FC<{
             hx-vals={JSON.stringify({ candidateId: candidate.id })}
             hx-target="body"
             hx-swap="outerHTML"
-            hx-confirm="Dismiss this candidate? Re-extract to bring it back."
           >
             Dismiss
           </button>
@@ -125,11 +124,7 @@ const ExtractCta: FC<{ plan: Plan; hasCandidates: boolean }> = ({
           hx-swap="outerHTML"
           hx-disabled-elt="this"
           hx-indicator="#shorts-indicator"
-          hx-confirm={
-            hasCandidates
-              ? 'Re-extract will discard the current candidate set. Continue?'
-              : undefined
-          }
+
         >
           {hasCandidates ? 'Re-extract candidates' : 'Extract Shorts candidates'}
         </button>

@@ -3,6 +3,23 @@ import { Layout, type LayoutProps } from './layout.js';
 import type { LLMSettings } from '../db/llm-settings.js';
 import type { ModelCatalog } from '../models/types.js';
 
+const ANTHROPIC_FALLBACK_MODELS = [
+  'claude-opus-4-7',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5-20251001',
+  'claude-opus-4-5',
+  'claude-sonnet-4-5',
+  'claude-haiku-4-5',
+];
+
+const OPENAI_FALLBACK_MODELS = [
+  'codex-mini-latest',
+  'o4-mini',
+  'o3-mini',
+  'gpt-4o',
+  'gpt-4o-mini',
+];
+
 export interface SettingsPageProps {
   settings: LLMSettings;
   catalog: ModelCatalog;
@@ -13,8 +30,14 @@ const ProviderCard: FC<{ settings: LLMSettings; catalog: ModelCatalog }> = ({
   settings,
   catalog,
 }) => {
-  const anthropicModels = catalog.anthropic.items.map((m) => m.id);
-  const openaiModels = catalog.openai.items.map((m) => m.id);
+  const anthropicModels = catalog.anthropic.items.length > 0
+    ? catalog.anthropic.items.map((m) => m.id)
+    : ANTHROPIC_FALLBACK_MODELS;
+  const openaiModels = catalog.openai.items.length > 0
+    ? catalog.openai.items.map((m) => m.id)
+    : OPENAI_FALLBACK_MODELS;
+  const anthropicLive = catalog.anthropic.items.length > 0;
+  const openaiLive = catalog.openai.items.length > 0;
 
   return (
     <form method="post" action="/settings" class="card">
@@ -40,59 +63,35 @@ const ProviderCard: FC<{ settings: LLMSettings; catalog: ModelCatalog }> = ({
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:18px;">
         <label>
           <div class="field-label" style="margin-bottom:6px;">Claude model</div>
-          {anthropicModels.length > 0 ? (
-            <select name="claudeModel" style="width:100%;">
-              {anthropicModels.map((id) => (
-                <option value={id} selected={settings.claudeModel === id}>{id}</option>
-              ))}
-              {!anthropicModels.includes(settings.claudeModel) ? (
-                <option value={settings.claudeModel} selected>{settings.claudeModel} (current)</option>
-              ) : null}
-            </select>
-          ) : (
-            <>
-              <input
-                type="text"
-                name="claudeModel"
-                value={settings.claudeModel}
-                style="width:100%;"
-                placeholder="e.g. claude-sonnet-4-5"
-              />
-              <div class="muted" style="font-size:12px; margin-top:4px;">
-                {catalog.anthropic.error
-                  ? `Catalog unavailable: ${catalog.anthropic.error}. Set ANTHROPIC_API_KEY to populate the list.`
-                  : 'Set ANTHROPIC_API_KEY to populate the model list.'}
-              </div>
-            </>
+          <select name="claudeModel" style="width:100%;">
+            {anthropicModels.map((id) => (
+              <option value={id} selected={settings.claudeModel === id}>{id}</option>
+            ))}
+            {!anthropicModels.includes(settings.claudeModel) ? (
+              <option value={settings.claudeModel} selected>{settings.claudeModel} (current)</option>
+            ) : null}
+          </select>
+          {!anthropicLive && (
+            <div class="muted" style="font-size:12px; margin-top:4px;">
+              Set ANTHROPIC_API_KEY to load live models.
+            </div>
           )}
         </label>
 
         <label>
           <div class="field-label" style="margin-bottom:6px;">Codex model</div>
-          {openaiModels.length > 0 ? (
-            <select name="codexModel" style="width:100%;">
-              {openaiModels.map((id) => (
-                <option value={id} selected={settings.codexModel === id}>{id}</option>
-              ))}
-              {!openaiModels.includes(settings.codexModel) ? (
-                <option value={settings.codexModel} selected>{settings.codexModel} (current)</option>
-              ) : null}
-            </select>
-          ) : (
-            <>
-              <input
-                type="text"
-                name="codexModel"
-                value={settings.codexModel}
-                style="width:100%;"
-                placeholder="e.g. codex-mini-latest"
-              />
-              <div class="muted" style="font-size:12px; margin-top:4px;">
-                {catalog.openai.error
-                  ? `Catalog unavailable: ${catalog.openai.error}. Set OPENAI_API_KEY to populate the list.`
-                  : 'Set OPENAI_API_KEY to populate the model list.'}
-              </div>
-            </>
+          <select name="codexModel" style="width:100%;">
+            {openaiModels.map((id) => (
+              <option value={id} selected={settings.codexModel === id}>{id}</option>
+            ))}
+            {!openaiModels.includes(settings.codexModel) ? (
+              <option value={settings.codexModel} selected>{settings.codexModel} (current)</option>
+            ) : null}
+          </select>
+          {!openaiLive && (
+            <div class="muted" style="font-size:12px; margin-top:4px;">
+              Set OPENAI_API_KEY to load live models.
+            </div>
           )}
         </label>
       </div>
@@ -107,30 +106,18 @@ const ProviderCard: FC<{ settings: LLMSettings; catalog: ModelCatalog }> = ({
 const CatalogStatus: FC<{ catalog: ModelCatalog }> = ({ catalog }) => {
   const { anthropic, openai } = catalog;
   return (
-    <div class="card">
-      <h3 class="section-label" style="margin-bottom:12px;">Model catalog</h3>
-      <p class="muted" style="font-size:13px; margin-bottom:12px;">
-        The catalog is refreshed every 24h from the provider APIs. Set
-        ANTHROPIC_API_KEY and/or OPENAI_API_KEY in the service .env to enable
-        automatic refresh. Without them, models are pinned to what's typed above.
-      </p>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-        <div style="background:var(--surface-raised); border-radius:7px; padding:12px;">
-          <div class="field-label" style="margin-bottom:6px;">Anthropic</div>
-          {anthropic.fetched ? (
-            <span style="color:var(--green-fg); font-size:13px;">{anthropic.items.length} models · refreshed {anthropic.refreshedAt ? new Date(anthropic.refreshedAt).toLocaleString() : '—'}</span>
-          ) : (
-            <span style="color:var(--ink-3); font-size:13px;">{anthropic.error ?? 'Not fetched'}</span>
-          )}
-        </div>
-        <div style="background:var(--surface-raised); border-radius:7px; padding:12px;">
-          <div class="field-label" style="margin-bottom:6px;">OpenAI</div>
-          {openai.fetched ? (
-            <span style="color:var(--green-fg); font-size:13px;">{openai.items.length} models · refreshed {openai.refreshedAt ? new Date(openai.refreshedAt).toLocaleString() : '—'}</span>
-          ) : (
-            <span style="color:var(--ink-3); font-size:13px;">{openai.error ?? 'Not fetched'}</span>
-          )}
-        </div>
+    <div class="card" style="padding-top:12px; padding-bottom:12px;">
+      <div class="row" style="align-items:center; gap:16px;">
+        <span class="section-label" style="margin:0;">Model catalog</span>
+        {([
+          { label: 'Anthropic', p: anthropic },
+          { label: 'OpenAI', p: openai },
+        ] as const).map(({ label, p }) => (
+          <span class="row" style="gap:6px; align-items:center; font-size:13px; color:var(--ink-2);">
+            <span style={`width:8px; height:8px; border-radius:50%; background:${p.fetched ? 'var(--green-fg)' : 'var(--ink-3)'}; flex-shrink:0;`} />
+            {label}
+          </span>
+        ))}
       </div>
     </div>
   );

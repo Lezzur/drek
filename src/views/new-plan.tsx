@@ -33,7 +33,7 @@ export const NewCoverLetterPlanPage: FC<NewCoverLetterFormProps> = ({
   return (
     <Layout title="New cover letter plan" flash={error ? { type: 'err', message: error } : null}>
       <h2>New cover letter plan</h2>
-      <p class="muted" style="margin-top:-8px;">
+      <p class="muted" style="margin-top:6px; margin-bottom:20px;">
         Paste the job listing. DREK will extract video requirements, match
         your projects, and generate scenes + scripts in Rick's voice.
       </p>
@@ -122,7 +122,7 @@ export const NewYoutubePlanPage: FC<NewYoutubeFormProps> = ({ values, error }) =
   return (
     <Layout title="New YouTube plan" flash={error ? { type: 'err', message: error } : null}>
       <h2>New YouTube plan</h2>
-      <p class="muted" style="margin-top:-8px;">
+      <p class="muted" style="margin-top:6px; margin-bottom:20px;">
         Enter the topic. DREK targets potential clients — videos are framed
         around business outcomes, not technology. Practitioners get pulled
         in by the technical credibility, not the framing.

@@ -108,18 +108,21 @@ describe('IntakeListPage', () => {
     const html = toHtml(IntakeListPage({ briefs, queueDepth: 5 }));
     expect(html).toContain('name="briefIds" value="brief_a"');
     expect(html).toContain('name="briefIds" value="brief_b"');
-    expect(html).toContain('id="brief-select-all"');
+    // No select-all checkbox in the header — per Rick 2026-05-22 UX
+    expect(html).not.toContain('id="brief-select-all"');
   });
 
-  it('renders the bulk action bar (hidden by default, shown via JS)', () => {
+  it('renders the bulk action bar (space reserved; visibility toggled via JS)', () => {
     const html = toHtml(IntakeListPage({ briefs: [fakeBrief()], queueDepth: 5 }));
     expect(html).toContain('id="bulk-action-bar"');
     expect(html).toContain('Retire selected');
     expect(html).toContain('Delete selected');
     expect(html).toContain('data-bulk-action="retire"');
     expect(html).toContain('data-bulk-action="delete"');
-    // Default hidden — script flips display when selection > 0
-    expect(html).toMatch(/id="bulk-action-bar"[^>]*style="[^"]*display:none/);
+    // Space is always reserved (display:flex) — visibility starts hidden
+    // so the page doesn't shift when the first checkbox flips on.
+    expect(html).toMatch(/id="bulk-action-bar"[^>]*style="[^"]*display:flex/);
+    expect(html).toMatch(/id="bulk-action-bar"[^>]*style="[^"]*visibility:hidden/);
   });
 
   it('embeds the bulk-action client script', () => {

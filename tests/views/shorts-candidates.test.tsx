@@ -107,7 +107,7 @@ describe('ShortsCandidateView — with candidates', () => {
     expect(html).toContain('<textarea');
   });
 
-  it('re-extract button uses hx-confirm when candidates already exist', () => {
+  it('re-extract button uses hx-indicator + hx-disabled-elt when candidates already exist', () => {
     const html = toHtml(
       ShortsCandidateView({
         plan: fakePlan(),
@@ -116,7 +116,9 @@ describe('ShortsCandidateView — with candidates', () => {
       }),
     );
     expect(html).toContain('Re-extract candidates');
-    expect(html).toContain('Re-extract will discard the current candidate set');
+    // UX pattern: swap the hx-confirm modal for an inline disable + spinner.
+    expect(html).toContain('hx-indicator="#shorts-indicator"');
+    expect(html).toContain('hx-disabled-elt="this"');
   });
 
   it('back link points to plan', () => {

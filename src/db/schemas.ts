@@ -520,12 +520,32 @@ export const buildStepSchema = z.object({
 });
 export type BuildStep = z.infer<typeof buildStepSchema>;
 
+/**
+ * v2.1.1 M35: build phases. A "phase" is one demoable milestone — one
+ * recordable video. Small briefs collapse into a single phase. Large
+ * multi-day briefs split into 2-5 phases, each becoming its own video
+ * in a series. Phases are additive on top of the flat buildSteps view
+ * (the transformer emits both: phases for structured edit/promote, and
+ * a flat buildSteps concat for back-compat + the legacy renderer).
+ */
+export const buildPhaseSchema = z.object({
+  title: z.string().min(1).max(200),
+  goal: z.string().min(20).max(800),
+  buildSteps: z.array(buildStepSchema).min(2).max(12),
+  shotHints: z.array(z.string().min(5).max(200)).min(2).max(12),
+});
+export type BuildPhase = z.infer<typeof buildPhaseSchema>;
+
 export const transformedBuildPlanSchema = z.object({
   goal: z.string().min(20).max(800),
   finalProduct: z.string().min(20).max(800),
   toolchain: z.array(toolchainEntrySchema).min(1).max(8),
-  buildSteps: z.array(buildStepSchema).min(3).max(12),
-  shotHints: z.array(z.string().min(5).max(200)).min(3).max(12),
+  buildSteps: z.array(buildStepSchema).min(3).max(60),
+  shotHints: z.array(z.string().min(5).max(200)).min(3).max(60),
+  /** v2.1.1 M35: optional per-phase breakdown. When present, drives the
+   *  accordion UI + per-phase promotion. When absent (pre-M35 briefs),
+   *  the legacy flat buildSteps render in a single implicit phase. */
+  phases: z.array(buildPhaseSchema).min(1).max(5).optional(),
 });
 export type TransformedBuildPlan = z.infer<typeof transformedBuildPlanSchema>;
 

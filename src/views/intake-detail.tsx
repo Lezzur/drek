@@ -143,6 +143,23 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
             <div class="field-label" style="margin-bottom:4px;">Rationale (optional)</div>
             <textarea name="scoringRationale" rows={3}>{brief.scoringRationale ?? ''}</textarea>
           </label>
+          <label style="display:block; margin-bottom:12px;">
+            <div class="field-label" style="margin-bottom:4px;">
+              Why are you overriding? (optional — gold for Neurocore learning)
+            </div>
+            <input
+              type="text"
+              name="overrideReason"
+              placeholder="e.g. 'scorer underrated scope — this is a 1-day build'"
+              maxLength={800}
+              style="width:100%;"
+            />
+            <div class="muted" style="font-size:11px; margin-top:4px;">
+              Captured in the <code>score.overridden</code> signal so Neurocore
+              can learn what the scorer consistently misses. Skip if no specific
+              reason — the signal still fires on the score delta alone.
+            </div>
+          </label>
           <button class="btn small" type="submit">Save scores</button>
         </form>
       </div>
@@ -197,6 +214,48 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
   );
 };
 
+const PhaseOverview: FC<{
+  phases: NonNullable<PipelineBrief['transformedBuildPlan']>['phases'];
+}> = ({ phases }) => {
+  if (!phases || phases.length === 0) return null;
+  const totalAll = phases.reduce(
+    (sum, p) => sum + p.buildSteps.reduce((s, x) => s + x.estimatedMinutes, 0),
+    0,
+  );
+  const hours = (totalAll / 60).toFixed(totalAll >= 120 ? 0 : 1);
+  return (
+    <div style="margin-bottom:18px; padding:12px 14px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-raised);">
+      <div class="row" style="align-items:center; margin-bottom:10px;">
+        <strong style="font-size:13px; color:var(--ink); text-transform:uppercase; letter-spacing:0.04em;">
+          {phases.length === 1 ? 'Single-phase build' : `${phases.length}-part series`}
+        </strong>
+        <span class="spacer" />
+        <span class="muted" style="font-size:12px;">~{hours}h total · {phases.length} video{phases.length === 1 ? '' : 's'}</span>
+      </div>
+      <ol style="margin:0; padding-left:22px; display:flex; flex-direction:column; gap:8px;">
+        {phases.map((p, i) => {
+          const phaseMins = p.buildSteps.reduce((s, x) => s + x.estimatedMinutes, 0);
+          return (
+            <li style="font-size:14px; color:var(--ink); line-height:1.5;">
+              <div style="display:flex; gap:8px; align-items:baseline;">
+                <strong style="flex:1;">
+                  Phase {i + 1}: {p.title}
+                </strong>
+                <span class="muted" style="font-size:12px; font-variant-numeric:tabular-nums;">
+                  {p.buildSteps.length} steps · {phaseMins} min
+                </span>
+              </div>
+              <div style="color:var(--ink-2); font-size:13px; line-height:1.5; margin-top:2px;">
+                {p.goal}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+};
+
 const TransformPanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
   const plan = brief.transformedBuildPlan;
   const stack = brief.pinnedTechStack;
@@ -224,6 +283,8 @@ const TransformPanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
 
       {/* VIEW MODE */}
       <div id={`bp-view-${brief.id}`}>
+        <PhaseOverview phases={plan.phases} />
+
         <div style="margin-bottom:14px;">
           <div class="field-label" style="margin-bottom:4px;">Goal</div>
           <div style="font-size:14px; color:var(--ink); line-height:1.6;">{plan.goal}</div>

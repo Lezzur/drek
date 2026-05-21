@@ -12,6 +12,7 @@ import type {
   PendingListingsResponse,
   PlanMode,
   PublishedScriptSignal,
+  ScoreOverriddenSignal,
 } from './types.js';
 
 const DEFAULT_RETRY_BACKOFF_MS = 2_000;
@@ -213,6 +214,30 @@ export class NeurocoreClient {
         occurredAt: payload.editedAt,
       },
       { idempotencyKey: `drek-build-plan-edited-${payload.briefId}-${payload.editedAt}` },
+    );
+  }
+
+  /**
+   * Send a `score.overridden` learning signal (M35). Fires every time
+   * Rick edits a brief's score via the Edit-scores form. The payload
+   * carries before+after scores, which axes moved, and an optional free
+   * text reason. Idempotency key carries `overriddenAt` so back-to-back
+   * edits within the 24h idempotency window land as separate signals.
+   *
+   * Best-effort: caller catches and logs — score persistence in
+   * Firestore never blocks on this.
+   */
+  async sendScoreOverridden(payload: ScoreOverriddenSignal): Promise<void> {
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'score.overridden',
+        payload,
+        occurredAt: payload.overriddenAt,
+      },
+      { idempotencyKey: `drek-score-overridden-${payload.briefId}-${payload.overriddenAt}` },
     );
   }
 

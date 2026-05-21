@@ -110,6 +110,31 @@ export interface ContentCatalogResponse {
   created: boolean;
 }
 
+/** Score override signal payload (M35). Fired every time Rick edits a
+ *  brief's score via the Edit-scores form. Highest-value labeled signal
+ *  in the system — every override is ground-truth feedback that the LLM
+ *  scorer mis-rated a brief. */
+export interface ScoreOverriddenSignal {
+  briefId: string;
+  originalScore: {
+    visualOutcome: number;
+    storyPotential: number;
+    scopeFit: number;
+    audienceMatch: number;
+    aggregate: number;
+  };
+  editedScore: {
+    visualOutcome: number;
+    storyPotential: number;
+    scopeFit: number;
+    audienceMatch: number;
+    aggregate: number;
+  };
+  axesChanged: Array<'visualOutcome' | 'storyPotential' | 'scopeFit' | 'audienceMatch'>;
+  reason?: string;
+  overriddenAt: string;
+}
+
 /** Build-plan edit signal payload (M33). Captures both the full before/
  *  after plan and a coarse `changed` summary for cheap pattern queries.
  *  Sent on every Rick-edit so Neurocore can learn what the LLM gets

@@ -62,6 +62,11 @@ export async function resetCounter(
 
 /** Well-known keys live here so callers don't pass magic strings. */
 export const BUILD_PLAN_EDITS_KEY = 'build_plan_edits';
+/** M35: count of manual score overrides (Edit-scores form submissions).
+ *  Surfaced alongside build-plan edits; same review-threshold pattern. */
+export const SCORE_OVERRIDES_KEY = 'score_overrides';
 
 /** M33: how many edits before we flag a "review the corpus" reminder. */
 export const M34_TRIGGER_THRESHOLD = 15;
+/** M35: same threshold for score-override pattern review. */
+export const SCORE_REVIEW_THRESHOLD = 15;

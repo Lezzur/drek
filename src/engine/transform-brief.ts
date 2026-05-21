@@ -7,9 +7,11 @@ import {
   patchPipelineBrief,
 } from '../db/pipeline-briefs.js';
 import {
+  buildPhaseSchema,
   pinnedTechStackSchema,
   transformedBuildPlanSchema,
   type BriefScore,
+  type BuildPhase,
   type PinnedTechStack,
   type PipelineBrief,
   type TransformedBuildPlan,
@@ -69,15 +71,35 @@ export interface TransformBriefResult {
 }
 
 /**
- * Gate: a brief is transformable iff it meets a minimum technical fit.
- * No narrative-axis check — the new transformer extracts build steps
- * regardless of how the brief is framed, so visualOutcome/storyPotential
- * are irrelevant to whether the transform CAN happen (they're still
- * relevant to whether the topic is worth recording, but that's a human
- * judgment call now, not a gate).
+ * Gate: a brief is transformable iff
+ *   - audienceMatch >= 3.0  (must have a real audience)
+ *   - scopeFit >= 2.0       (sanity floor — rejects "build me a startup")
+ *
+ * Multi-day briefs (scopeFit = 2) are NOW allowed: the transformer
+ * splits them into 2-5 phases, each phase becoming one video in a
+ * series. Pre-M35 the gate was scopeFit >= 3.0 (single-session only).
+ *
+ * visualOutcome/storyPotential are not gated — they're a human
+ * judgment about whether the topic is worth recording, separate from
+ * whether the transform CAN happen.
  */
 export function isTransformable(score: BriefScore): boolean {
-  return score.scopeFit >= 3.0 && score.audienceMatch >= 3.0;
+  return score.audienceMatch >= 3.0 && score.scopeFit >= 2.0;
+}
+
+/**
+ * Per-axis breakdown of why a brief failed the gate. Returned alongside
+ * isTransformable so the UI can render specific "Blocked: scope" /
+ * "Blocked: audience" badges with a hover-title explaining the rule.
+ */
+export function transformableReason(score: BriefScore): {
+  ok: boolean;
+  failedAxes: Array<'scopeFit' | 'audienceMatch'>;
+} {
+  const failed: Array<'scopeFit' | 'audienceMatch'> = [];
+  if (score.scopeFit < 2.0) failed.push('scopeFit');
+  if (score.audienceMatch < 3.0) failed.push('audienceMatch');
+  return { ok: failed.length === 0, failedAxes: failed };
 }
 
 const llmTransformSchema = z.object({
@@ -93,40 +115,45 @@ const llmTransformSchema = z.object({
     )
     .min(1)
     .max(8),
-  buildSteps: z
-    .array(
-      z.object({
-        title: z.string().min(1).max(200),
-        description: z.string().min(1).max(800),
-        estimatedMinutes: z.number().int().min(1).max(240),
-      }),
-    )
-    .min(3)
-    .max(12),
-  shotHints: z.array(z.string().min(5).max(200)).min(3).max(12),
+  phases: z.array(buildPhaseSchema).min(1).max(5),
   pinnedTechStack: pinnedTechStackSchema,
 });
 type LLMTransformOutput = z.infer<typeof llmTransformSchema>;
 
-const SYSTEM_HEADER = `You are turning a freelance/client brief into a buildable plan for a YouTube "build along with Claude Code" video.
+const SYSTEM_HEADER = `You are turning a freelance/client brief into a buildable plan for a YouTube "build along with Claude Code" video series.
 
-The brief tells you WHAT the client wants and (usually) which one tool they require. Your job is to extract the latent BUILD: the goal, the final demo state, the full toolchain (including tools the brief didn't name but the build obviously needs), the step-by-step instructions, and the shots that step list implies.
+The brief tells you WHAT the client wants and (usually) which one tool they require. Your job is to extract the latent BUILD: the goal, the final demo state, the full toolchain (including tools the brief didn't name but the build obviously needs), and the build broken into PHASES — each phase is one recordable video.
+
+A PHASE is one demoable milestone. The viewer should be able to watch a single phase video and see something working at the end of it. A phase has its own goal, its own step-by-step build instructions, and its own shot hints.
+
+PHASE COUNT GUIDANCE:
+- If the total build is ≤ 4 hours of focused work: emit ONE phase (single-video build).
+- If the total build is 4-12 hours: emit 2-3 phases.
+- If the total build is multi-day (> 12 hours of focused work): emit 3-5 phases.
+- NEVER emit a phase that lacks a visible demo at the end ("phase 1: set up project" — bad. "phase 1: working ingest pipeline you can pipe a file through" — good).
 
 OUTPUT FORMAT — return a SINGLE JSON object:
 {
-  "goal": "<one paragraph: what we're building and the business outcome it delivers>",
-  "finalProduct": "<one paragraph: what the viewer sees working at the end — the 10-second wow shot>",
+  "goal": "<one paragraph: what the whole series is building and the business outcome it delivers>",
+  "finalProduct": "<one paragraph: what the viewer sees working at the end of the FINAL phase — the 10-second wow shot>",
   "toolchain": [
     { "name": "<Tool name>", "role": "<what role it plays>", "source": "given" | "assumed" },
     ...
   ],
-  "buildSteps": [
-    { "title": "<short imperative title>", "description": "<what gets built in this step>", "estimatedMinutes": <int 1-240> },
-    ...  3 to 12 steps total
-  ],
-  "shotHints": [
-    "<short directive: 'open Vapi dashboard, point to call-flow editor'>",
-    ...  3 to 12 hints total
+  "phases": [
+    {
+      "title": "<short imperative title: 'Wire the ingest pipeline'>",
+      "goal": "<one paragraph: what this specific phase produces — the milestone you can demo at the end of this video>",
+      "buildSteps": [
+        { "title": "<short imperative title>", "description": "<what gets built in this step>", "estimatedMinutes": <int 1-240> },
+        ...  2 to 12 steps per phase
+      ],
+      "shotHints": [
+        "<short directive: 'open Vapi dashboard, point to call-flow editor'>",
+        ...  2 to 12 hints per phase
+      ]
+    },
+    ...  1 to 5 phases total
   ],
   "pinnedTechStack": {
     "primary": "<tech_<slug> from the catalog below>",
@@ -138,9 +165,9 @@ OUTPUT FORMAT — return a SINGLE JSON object:
 RULES:
 - Tech-stack ids in pinnedTechStack MUST exist in the catalog below. Inventing a slug → invalid output → retry.
 - toolchain entries: mark "given" when the brief explicitly names the tool, "assumed" when you're filling in what the build obviously needs. The brief is allowed to give one tool (e.g., "Vapi") and you fill in the rest.
-- buildSteps must be Claude-Code-executable. Each step should describe an actionable build chunk (not "discuss" or "consider"). estimatedMinutes is your honest guess.
-- shotHints describe what the camera should be on during the build — UI screens, terminal output, live demo moments. They don't need to map 1:1 to buildSteps.
-- The total estimated build time (sum of estimatedMinutes) should be 60-240 minutes — a 2-to-4-hour Claude Code session. Adjust step granularity to hit that envelope.
+- Each phase's buildSteps must be Claude-Code-executable. Each step should describe an actionable build chunk (not "discuss" or "consider"). estimatedMinutes is your honest guess.
+- Each phase's shotHints describe what the camera should be on during that phase — UI screens, terminal output, live demo moments.
+- Each phase should sum to 60-240 minutes of work (a recordable session). Don't pad short phases or stuff a multi-day phase into one video.
 - Output JSON ONLY. No fences, no prose. Start with { and end with }.`;
 
 function buildPrompt(
@@ -289,7 +316,7 @@ export async function transformBrief(
   if (!isTransformable(brief.score)) {
     throw new IntakeError(
       'INVALID_OUTPUT',
-      `brief is not transformable: scopeFit=${brief.score.scopeFit}, audienceMatch=${brief.score.audienceMatch}. Gate requires BOTH technical axes >= 3.0.`,
+      `brief is not transformable: scopeFit=${brief.score.scopeFit}, audienceMatch=${brief.score.audienceMatch}. Gate requires scopeFit >= 2.0 AND audienceMatch >= 3.0.`,
       { briefId },
     );
   }
@@ -378,12 +405,19 @@ export async function transformBrief(
   }
 
   const pinnedTechStack = pinnedTechStackSchema.parse(result.pinnedTechStack);
+  // Flatten phases into the legacy top-level fields so existing readers
+  // (M33 edit diffing, downstream renderers, Firestore exports) keep
+  // working without conditional branches. The phases array remains the
+  // canonical structured form for the accordion UI + per-phase promotion.
+  const flattenedSteps = result.phases.flatMap((p) => p.buildSteps);
+  const flattenedShots = result.phases.flatMap((p) => p.shotHints);
   const transformedBuildPlan: TransformedBuildPlan = transformedBuildPlanSchema.parse({
     goal: result.goal,
     finalProduct: result.finalProduct,
     toolchain: result.toolchain,
-    buildSteps: result.buildSteps,
-    shotHints: result.shotHints,
+    buildSteps: flattenedSteps,
+    shotHints: flattenedShots,
+    phases: result.phases,
   });
 
   let updated: PipelineBrief | null;
@@ -422,11 +456,12 @@ export async function transformBrief(
       briefId,
       pinnedTechStack: pinnedTechStack.primary,
       retried,
+      phaseCount: transformedBuildPlan.phases?.length ?? 1,
       buildStepCount: transformedBuildPlan.buildSteps.length,
       totalEstimateMinutes,
       durationMs,
     },
-    'brief transformed (M29-redo: build plan extracted)',
+    'brief transformed (M35: phased build plan extracted)',
   );
 
   return {

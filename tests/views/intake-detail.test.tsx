@@ -320,3 +320,108 @@ describe('BriefDetailPage — TransformPanel (build plan)', () => {
     expect(html).not.toContain('Toolchain');
   });
 });
+
+// ---- M35 phase overview + reason field ----
+
+function multiPhasePlan() {
+  return {
+    ...samplePlan(),
+    phases: [
+      {
+        title: 'Working voice bot scaffold',
+        goal: 'Phase 1 ships a working Vapi assistant that can answer a live call and read back the qualification script.',
+        buildSteps: [
+          { title: 'Scaffold Vapi assistant', description: 'Initial config.', estimatedMinutes: 30 },
+          { title: 'Voice tuning', description: 'Pick voice + settings.', estimatedMinutes: 30 },
+        ],
+        shotHints: ['Vapi dashboard', 'Live call'],
+      },
+      {
+        title: 'Wire CRM + email sink',
+        goal: 'Phase 2 adds goHighLevel contact creation and Gmail summary delivery downstream of the call.',
+        buildSteps: [
+          { title: 'n8n webhook', description: 'Receive Vapi payload.', estimatedMinutes: 45 },
+          { title: 'goHighLevel node', description: 'Create contact.', estimatedMinutes: 30 },
+        ],
+        shotHints: ['n8n canvas', 'goHighLevel contact'],
+      },
+    ],
+  };
+}
+
+describe('BriefDetailPage — phase overview (M35)', () => {
+  it('renders phase overview when phases are present', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({
+          score: transformableScore(),
+          transformedBuildPlan: multiPhasePlan(),
+          pinnedTechStack: { primary: 'tech_vapi', supporting: [], rationale: 'r' },
+        }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    expect(html).toContain('2-part series');
+    expect(html).toContain('Phase 1: Working voice bot scaffold');
+    expect(html).toContain('Phase 2: Wire CRM + email sink');
+    expect(html).toContain('2 videos');
+  });
+
+  it('renders "Single-phase build" header when only one phase is present', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({
+          score: transformableScore(),
+          transformedBuildPlan: {
+            ...samplePlan(),
+            phases: [
+              {
+                title: 'Whole build',
+                goal: 'One-session build covering the full Vapi + CRM integration.',
+                buildSteps: samplePlan().buildSteps,
+                shotHints: samplePlan().shotHints,
+              },
+            ],
+          },
+          pinnedTechStack: { primary: 'tech_vapi', supporting: [], rationale: 'r' },
+        }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    expect(html).toContain('Single-phase build');
+    expect(html).toContain('1 video');
+  });
+
+  it('does NOT render phase overview when phases field is absent (legacy plans)', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({
+          score: transformableScore(),
+          transformedBuildPlan: samplePlan(), // no phases field
+          pinnedTechStack: { primary: 'tech_vapi', supporting: [], rationale: 'r' },
+        }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    expect(html).not.toContain('Single-phase build');
+    expect(html).not.toContain('-part series');
+  });
+});
+
+describe('BriefDetailPage — score edit form reason field (M35)', () => {
+  it('renders the optional overrideReason input field', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({ score: transformableScore() }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    expect(html).toContain('name="overrideReason"');
+    expect(html).toContain('Why are you overriding?');
+    expect(html).toContain('score.overridden');
+  });
+});

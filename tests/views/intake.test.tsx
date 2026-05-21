@@ -144,4 +144,108 @@ describe('IntakeListPage', () => {
     expect(html).toContain('href="/intake/batch/new"');
     expect(html).toContain('Add batch');
   });
+
+  // ---- M35 transformable badge ----
+
+  it('renders ✓ Transformable badge when score passes the gate', () => {
+    const passing = fakeBrief({
+      id: 'pass',
+      score: {
+        visualOutcome: 4,
+        storyPotential: 4,
+        scopeFit: 4,
+        audienceMatch: 4,
+        aggregate: 4.0,
+      },
+    });
+    const html = toHtml(IntakeListPage({ briefs: [passing], queueDepth: 5 }));
+    expect(html).toContain('✓ Transformable');
+    expect(html).not.toContain('Blocked:');
+  });
+
+  it('renders Blocked: scope badge when scopeFit < 2.0', () => {
+    const blocked = fakeBrief({
+      id: 'blocked-scope',
+      score: {
+        visualOutcome: 5,
+        storyPotential: 5,
+        scopeFit: 1,
+        audienceMatch: 5,
+        aggregate: 4.0,
+      },
+    });
+    const html = toHtml(IntakeListPage({ briefs: [blocked], queueDepth: 5 }));
+    expect(html).toContain('Blocked: scope');
+  });
+
+  it('renders Blocked: audience badge when audienceMatch < 3.0', () => {
+    const blocked = fakeBrief({
+      id: 'blocked-audience',
+      score: {
+        visualOutcome: 4,
+        storyPotential: 4,
+        scopeFit: 4,
+        audienceMatch: 2,
+        aggregate: 3.5,
+      },
+    });
+    const html = toHtml(IntakeListPage({ briefs: [blocked], queueDepth: 5 }));
+    expect(html).toContain('Blocked: audience');
+  });
+
+  it('renders Blocked: scope, audience when both axes fail', () => {
+    const blocked = fakeBrief({
+      id: 'blocked-both',
+      score: {
+        visualOutcome: 5,
+        storyPotential: 5,
+        scopeFit: 1,
+        audienceMatch: 1,
+        aggregate: 3.0,
+      },
+    });
+    const html = toHtml(IntakeListPage({ briefs: [blocked], queueDepth: 5 }));
+    expect(html).toContain('Blocked: scope, audience');
+  });
+
+  it('M35 4/4/2/5 brief gets the ✓ Transformable badge (multi-day series allowed)', () => {
+    const ricks = fakeBrief({
+      id: 'ricks-brief',
+      score: {
+        visualOutcome: 4,
+        storyPotential: 4,
+        scopeFit: 2,
+        audienceMatch: 5,
+        aggregate: 3.75,
+      },
+    });
+    const html = toHtml(IntakeListPage({ briefs: [ricks], queueDepth: 5 }));
+    expect(html).toContain('✓ Transformable');
+  });
+
+  it('does not render any transformable badge for unscored briefs', () => {
+    const unscored = fakeBrief({ id: 'unscored', score: null });
+    const html = toHtml(IntakeListPage({ briefs: [unscored], queueDepth: 5 }));
+    expect(html).not.toContain('Transformable');
+    expect(html).not.toContain('Blocked:');
+  });
+
+  // ---- M35 score-overrides counter + threshold banner ----
+
+  it('renders Score overrides counter when below threshold', () => {
+    const html = toHtml(
+      IntakeListPage({ briefs: [], queueDepth: 5, scoreOverrideCount: 7 }),
+    );
+    expect(html).toContain('Score overrides: 7/15');
+  });
+
+  it('renders the score-review banner when overrides reach the threshold', () => {
+    const html = toHtml(
+      IntakeListPage({ briefs: [], queueDepth: 5, scoreOverrideCount: 16 }),
+    );
+    expect(html).toContain('16 score overrides reached');
+    expect(html).toContain('score.overridden');
+    // Counter pill hides once the banner takes over
+    expect(html).not.toContain('Score overrides: 16/15');
+  });
 });

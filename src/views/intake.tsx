@@ -1,6 +1,7 @@
 import type { FC } from 'hono/jsx';
 import { Layout, type LayoutProps } from './layout.js';
 import type { PipelineBrief, BriefStage, BriefScore } from '../db/schemas.js';
+import { transformableReason } from '../engine/transform-brief.js';
 
 export { BriefStage };
 
@@ -13,10 +14,15 @@ export interface IntakeListPageProps {
    *  tracking. Surfaced in the header so progress toward the M34
    *  pattern-analysis trigger is always visible. */
   buildPlanEditCount?: number;
+  /** M35: count of manual score overrides. Same review-threshold pattern
+   *  as buildPlanEditCount — banner fires at >= 15 so Tony reviews the
+   *  score.overridden corpus for scorer bias. */
+  scoreOverrideCount?: number;
   flash?: LayoutProps['flash'];
 }
 
 const M34_TRIGGER_THRESHOLD = 15;
+const SCORE_REVIEW_THRESHOLD = 15;
 
 const STAGE_LABELS: Record<BriefStage, string> = {
   candidate: 'Candidate',
@@ -92,6 +98,44 @@ const ScoreBadge: FC<{ score: BriefScore }> = ({ score }) => {
   );
 };
 
+/**
+ * M35: at-a-glance transform-eligibility pill. Renders under the score
+ * badge in the intake list so Rick can spot which briefs will give him
+ * the Transform button before clicking in.
+ *
+ *   ok          → "✓ Transformable" (green)
+ *   one failure → "Blocked: scope" / "Blocked: audience" (amber)
+ *   two failures→ "Blocked: scope, audience" (amber)
+ *
+ * Hover-title spells out the gate rule so Rick doesn't have to remember it.
+ */
+const AXIS_LABEL: Record<'scopeFit' | 'audienceMatch', string> = {
+  scopeFit: 'scope',
+  audienceMatch: 'audience',
+};
+const TransformableBadge: FC<{ score: BriefScore }> = ({ score }) => {
+  const { ok, failedAxes } = transformableReason(score);
+  if (ok) {
+    return (
+      <span
+        title="Passes transformer gate (scopeFit >= 2.0 AND audienceMatch >= 3.0)"
+        style="display:inline-block;margin-top:4px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:var(--green-bg, rgba(16,185,129,0.12));color:var(--green-fg);text-transform:uppercase;letter-spacing:0.04em;"
+      >
+        ✓ Transformable
+      </span>
+    );
+  }
+  const labels = failedAxes.map((a) => AXIS_LABEL[a]).join(', ');
+  return (
+    <span
+      title="Blocked by transformer gate (requires scopeFit >= 2.0 AND audienceMatch >= 3.0). Edit the score if the LLM rated it wrong."
+      style="display:inline-block;margin-top:4px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:var(--amber-bg, rgba(245,158,11,0.12));color:var(--amber-fg);text-transform:uppercase;letter-spacing:0.04em;"
+    >
+      Blocked: {labels}
+    </span>
+  );
+};
+
 const StagePills: FC<{ currentStage?: BriefStage }> = ({ currentStage }) => {
   return (
     <div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:16px;">
@@ -159,7 +203,12 @@ const BriefRow: FC<{ brief: PipelineBrief }> = ({ brief }) => {
 
       <div style="text-align:center;">
         {brief.score ? (
-          <ScoreBadge score={brief.score} />
+          <>
+            <ScoreBadge score={brief.score} />
+            <div>
+              <TransformableBadge score={brief.score} />
+            </div>
+          </>
         ) : (
           <span class="muted" style="font-size:12px; font-style:italic;">—</span>
         )}
@@ -351,9 +400,11 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
   currentStage,
   queueDepth,
   buildPlanEditCount = 0,
+  scoreOverrideCount = 0,
   flash,
 }) => {
   const m34Triggered = buildPlanEditCount >= M34_TRIGGER_THRESHOLD;
+  const scoreReviewTriggered = scoreOverrideCount >= SCORE_REVIEW_THRESHOLD;
   return (
     <Layout title="Intake pipeline" flash={flash}>
       <div class="row" style="margin-bottom:8px;">
@@ -366,6 +417,15 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
             title="Edits accumulated toward the M34 pattern-analysis trigger. At 15 edits we review the corpus to teach Neurocore Rick's substitution + granularity preferences."
           >
             Build-plan edits: {buildPlanEditCount}/{M34_TRIGGER_THRESHOLD}
+          </span>
+        ) : null}
+        {!scoreReviewTriggered ? (
+          <span
+            class="muted"
+            style="font-size:12px; padding:4px 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px;"
+            title="Manual score overrides. At 15 we review the score.overridden corpus to detect scorer bias (e.g., scopeFit consistently underrated on briefs mentioning X stack)."
+          >
+            Score overrides: {scoreOverrideCount}/{SCORE_REVIEW_THRESHOLD}
           </span>
         ) : null}
         <a class="btn secondary" href="/intake/new">Add brief</a>
@@ -389,6 +449,25 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
               look for substitution patterns (e.g., tools you keep swapping) +
               step-granularity drift. See the email{' '}
               <em>"Tony — M34 trigger reminder"</em> for the full procedure.
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {scoreReviewTriggered ? (
+        <div
+          class="flash warn"
+          style="margin-bottom:16px; display:flex; gap:12px; align-items:flex-start;"
+        >
+          <span style="font-size:20px;">🎯</span>
+          <div style="flex:1; line-height:1.5;">
+            <strong>{scoreOverrideCount} score overrides reached — time to review scorer bias.</strong>
+            <div style="margin-top:4px; font-size:13px; color:var(--ink-2);">
+              You've crossed the score-review threshold ({SCORE_REVIEW_THRESHOLD}+ overrides).
+              Pull the <code>score.overridden</code> signals from Neurocore and
+              look for systematic patterns — which axis gets corrected most often,
+              and what kind of briefs trigger the override. Use the findings to
+              re-tune the scoring prompt.
             </div>
           </div>
         </div>

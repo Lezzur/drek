@@ -11,12 +11,12 @@ import {
   listBriefs,
   transitionBriefStage,
   promoteBriefToPlan,
-  updateBriefScore,
   type BulkBriefAction,
 } from '../intake/service.js';
 import { scoreBriefViaLLM } from '../intake/scoring.js';
 import { transformBrief } from '../engine/transform-brief.js';
 import { editBuildPlan } from '../intake/edit-build-plan.js';
+import { overrideScore } from '../intake/override-score.js';
 import {
   pinnedTechStackSchema,
   transformedBuildPlanSchema,
@@ -89,6 +89,10 @@ const manualScoreSchema = z.object({
   scopeFit: z.coerce.number().int().min(1).max(5),
   audienceMatch: z.coerce.number().int().min(1).max(5),
   scoringRationale: z.string().optional(),
+  /** M35: free-text "why did you override?" — fed into score.overridden
+   *  signal so Neurocore can correlate scorer bias with the human
+   *  rationale. Optional; UI shows it as a single-line input. */
+  overrideReason: z.string().max(800).optional(),
 });
 
 const bulkActionSchema = z.object({
@@ -125,18 +129,21 @@ app.get('/intake', async (c) => {
     queueDepth = candidateBriefs.length + vettedBriefs.length;
   }
 
-  // M33 counter: number of times Rick has edited a build plan since DREK
-  // started counting. Surfaced in the page header so he can track
-  // progress toward the M34 trigger (~15 edits → review the corpus).
+  // M33 + M35 counters: track edits accumulated toward review thresholds.
   // Best-effort — counter failures don't block the page render.
   let buildPlanEditCount = 0;
+  let scoreOverrideCount = 0;
   try {
-    const { getCounter, BUILD_PLAN_EDITS_KEY } = await import('../db/admin-counters.js');
-    buildPlanEditCount = await getCounter(BUILD_PLAN_EDITS_KEY);
+    const { getCounter, BUILD_PLAN_EDITS_KEY, SCORE_OVERRIDES_KEY } =
+      await import('../db/admin-counters.js');
+    [buildPlanEditCount, scoreOverrideCount] = await Promise.all([
+      getCounter(BUILD_PLAN_EDITS_KEY),
+      getCounter(SCORE_OVERRIDES_KEY),
+    ]);
   } catch (err) {
     logger.warn(
       { err: (err as Error).message },
-      'intake: failed to read build_plan_edits counter',
+      'intake: failed to read counters',
     );
   }
 
@@ -146,6 +153,7 @@ app.get('/intake', async (c) => {
       currentStage={stage}
       queueDepth={queueDepth}
       buildPlanEditCount={buildPlanEditCount}
+      scoreOverrideCount={scoreOverrideCount}
     />,
   );
 });
@@ -716,8 +724,14 @@ app.patch('/intake/:briefId', async (c) => {
     );
   }
 
-  const { visualOutcome, storyPotential, scopeFit, audienceMatch, scoringRationale } =
-    parsed.data;
+  const {
+    visualOutcome,
+    storyPotential,
+    scopeFit,
+    audienceMatch,
+    scoringRationale,
+    overrideReason,
+  } = parsed.data;
 
   const aggregate =
     Math.round(((visualOutcome + storyPotential + scopeFit + audienceMatch) / 4) * 10) / 10;
@@ -731,7 +745,12 @@ app.patch('/intake/:briefId', async (c) => {
   });
 
   try {
-    const updated = await updateBriefScore(briefId, score, scoringRationale);
+    const { brief: updated, signalSent } = await overrideScore(
+      briefId,
+      score,
+      overrideReason,
+      scoringRationale ?? null,
+    );
     const formatProfiles = listFormatProfiles();
     const audienceProfiles = await getAudienceProfileClient()
       .list()
@@ -741,7 +760,12 @@ app.patch('/intake/:briefId', async (c) => {
         brief={updated}
         formatProfiles={formatProfiles}
         audienceProfiles={audienceProfiles}
-        flash={{ type: 'ok', message: 'Scores updated.' }}
+        flash={{
+          type: 'ok',
+          message: signalSent
+            ? 'Scores updated. Override sent to Neurocore.'
+            : 'Scores updated.',
+        }}
       />,
     );
   } catch (err) {

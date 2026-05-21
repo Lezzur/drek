@@ -837,6 +837,14 @@ export const BriefDetailPage: FC<BriefDetailPageProps> = ({
 
       <div style="display:grid; grid-template-columns:1fr 340px; gap:20px; align-items:flex-start;">
         <div>
+          {/* Build plan lives in the main column, above the brief text -- Rick
+              wants it as the primary thing he sees once a transform completes,
+              not tucked into the 340px sidebar. TransformPanel returns null
+              when the brief has no transformedBuildPlan yet, so this slot is
+              empty pre-transform and the brief-text panel becomes the top
+              element. */}
+          <TransformPanel brief={brief} />
+
           {/* Open by default per Rick — he reads the brief text on every visit
               so collapsing it just hid information he always wanted. The
               <details> element still lets him collapse manually if he wants to. */}
@@ -870,7 +878,6 @@ export const BriefDetailPage: FC<BriefDetailPageProps> = ({
 
         <div>
           <ScorePanel brief={brief} />
-          <TransformPanel brief={brief} />
           <PromoteForm
             brief={brief}
             formatProfiles={formatProfiles}

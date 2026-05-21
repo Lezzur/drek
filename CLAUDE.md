@@ -9,6 +9,24 @@ AI video director — pre-production planning and scene scripting.
 - **Commands:** `nssm start DREK` / `nssm stop DREK` / `nssm restart DREK`
 - **Logs:** `F:\claude-code\claude_projects\drek\logs\service.log`
 
+## Deploying
+
+DREK runs `node dist/index.js`. A bare `git pull` does NOT update
+the running service — `dist/` has to be rebuilt. Use the script:
+
+```powershell
+.\scripts\deploy.ps1
+```
+
+That runs `git pull` → `npm run build` → `nssm restart DREK` → hits
+`/healthz` to verify. Flags: `-SkipPull`, `-SkipBuild`, `-SkipRestart`
+for the rebuild-only / restart-only / pull-only cases.
+
+**Never skip the build step manually.** New UI/route/engine code lives
+in `src/`; the NSSM service reads `dist/`. Pull-then-restart without
+rebuild keeps the old compiled code running and "no changes appeared"
+becomes a 30-minute investigation.
+
 ## Firebase / Firestore
 
 - **Display name:** DREK

@@ -195,24 +195,27 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
             extract the build plan: goal, toolchain, step-by-step instructions,
             and shot hints.
           </div>
-          <button
-            class="btn small accent"
-            type="button"
-            hx-post={`/intake/${brief.id}/transform`}
-            hx-target="body"
-            hx-swap="outerHTML"
-            hx-confirm="Transform this brief into a build plan? The LLM will derive goal + toolchain + build steps + shots. ~60-120s."
-            hx-indicator={`#transform-indicator-${brief.id}`}
-            hx-disabled-elt="this"
-          >
-            Transform → build plan
-          </button>
-          <span
-            class="score-spinner htmx-indicator"
-            id={`transform-indicator-${brief.id}`}
-          >
-            Transforming… (~60-120s)
-          </span>
+          <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center;">
+            <button
+              class="btn small accent"
+              type="button"
+              hx-post={`/intake/${brief.id}/transform`}
+              hx-target="body"
+              hx-swap="outerHTML"
+              hx-confirm="Transform this brief into a build plan? The LLM will derive goal + toolchain + build steps + shots. ~60-120s."
+              hx-indicator={`#transform-indicator-${brief.id}`}
+              hx-disabled-elt="this"
+            >
+              Transform → build plan
+            </button>
+            <span
+              class="score-spinner htmx-indicator"
+              id={`transform-indicator-${brief.id}`}
+              style="margin-left:0;"
+            >
+              Transforming…
+            </span>
+          </div>
         </div>
       ) : null}
 
@@ -492,7 +495,7 @@ const TransformPanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
           class="score-spinner htmx-indicator"
           id={`retransform-indicator-${brief.id}`}
         >
-          Transforming… (~60-120s)
+          Transforming…
         </span>
       </div>
       <script

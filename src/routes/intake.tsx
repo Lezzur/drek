@@ -16,6 +16,13 @@ import {
 } from '../intake/service.js';
 import { scoreBriefViaLLM } from '../intake/scoring.js';
 import { transformBrief } from '../engine/transform-brief.js';
+import { editBuildPlan } from '../intake/edit-build-plan.js';
+import {
+  pinnedTechStackSchema,
+  transformedBuildPlanSchema,
+  type PinnedTechStack,
+  type TransformedBuildPlan,
+} from '../db/schemas.js';
 import { IntakeError } from '../intake/errors.js';
 import { listFormatProfiles } from '../engine/format-profiles/index.js';
 import { getAudienceProfileClient } from '../neurocore/audience-profiles.js';
@@ -118,8 +125,28 @@ app.get('/intake', async (c) => {
     queueDepth = candidateBriefs.length + vettedBriefs.length;
   }
 
+  // M33 counter: number of times Rick has edited a build plan since DREK
+  // started counting. Surfaced in the page header so he can track
+  // progress toward the M34 trigger (~15 edits → review the corpus).
+  // Best-effort — counter failures don't block the page render.
+  let buildPlanEditCount = 0;
+  try {
+    const { getCounter, BUILD_PLAN_EDITS_KEY } = await import('../db/admin-counters.js');
+    buildPlanEditCount = await getCounter(BUILD_PLAN_EDITS_KEY);
+  } catch (err) {
+    logger.warn(
+      { err: (err as Error).message },
+      'intake: failed to read build_plan_edits counter',
+    );
+  }
+
   return c.html(
-    <IntakeListPage briefs={briefs} currentStage={stage} queueDepth={queueDepth} />,
+    <IntakeListPage
+      briefs={briefs}
+      currentStage={stage}
+      queueDepth={queueDepth}
+      buildPlanEditCount={buildPlanEditCount}
+    />,
   );
 });
 
@@ -378,7 +405,9 @@ app.get('/intake/:briefId', async (c) => {
       flashParam === 'scored'
         ? { type: 'ok' as const, message: 'Brief scored successfully.' }
         : flashParam === 'transformed'
-        ? { type: 'ok' as const, message: 'Brief transformed — review the before/after below.' }
+        ? { type: 'ok' as const, message: 'Brief transformed — review the build plan below.' }
+        : flashParam === 'plan-edited'
+        ? { type: 'ok' as const, message: 'Build plan saved. Edit captured as a learning signal.' }
         : null;
 
     return c.html(
@@ -460,6 +489,77 @@ app.post('/intake/:briefId/transform', async (c) => {
       }
     }
     logger.error({ briefId, err: (err as Error).message }, 'intake.transform: unexpected');
+    throw err;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /intake/:briefId/build-plan — save Rick's manual edits to the build
+// plan (M33). Accepts the full plan + tech stack as JSON; persists locally
+// and fires a build_plan.edited learning signal to Neurocore (best-effort).
+// ---------------------------------------------------------------------------
+
+const buildPlanEditPayloadSchema = z.object({
+  goal: transformedBuildPlanSchema.shape.goal,
+  finalProduct: transformedBuildPlanSchema.shape.finalProduct,
+  toolchain: transformedBuildPlanSchema.shape.toolchain,
+  buildSteps: transformedBuildPlanSchema.shape.buildSteps,
+  shotHints: transformedBuildPlanSchema.shape.shotHints,
+  pinnedTechStack: pinnedTechStackSchema,
+});
+
+app.post('/intake/:briefId/build-plan', async (c) => {
+  const briefId = c.req.param('briefId');
+  const raw = await c.req.json().catch(() => null);
+  const parsed = buildPlanEditPayloadSchema.safeParse(raw);
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Invalid build plan payload',
+          detail: parsed.error.flatten(),
+        },
+      },
+      400,
+    );
+  }
+  const edited: TransformedBuildPlan = {
+    goal: parsed.data.goal,
+    finalProduct: parsed.data.finalProduct,
+    toolchain: parsed.data.toolchain,
+    buildSteps: parsed.data.buildSteps,
+    shotHints: parsed.data.shotHints,
+  };
+  const editedStack: PinnedTechStack = parsed.data.pinnedTechStack;
+
+  try {
+    const result = await editBuildPlan(briefId, edited, editedStack);
+    logger.info(
+      {
+        briefId,
+        signalSent: result.signalSent,
+        signalError: result.signalError,
+      },
+      'intake.build-plan: edited',
+    );
+    return c.json({ ok: true, signalSent: result.signalSent });
+  } catch (err) {
+    if (err instanceof IntakeError) {
+      if (err.code === 'BRIEF_NOT_FOUND') {
+        return c.json({ error: { code: err.code, message: err.message } }, 404);
+      }
+      if (err.code === 'INVALID_OUTPUT') {
+        return c.json({ error: { code: err.code, message: err.message } }, 400);
+      }
+      if (err.code === 'PERSIST_FAILED') {
+        return c.json({ error: { code: err.code, message: err.message } }, 500);
+      }
+    }
+    logger.error(
+      { briefId, err: (err as Error).message },
+      'intake.build-plan: unexpected',
+    );
     throw err;
   }
 });

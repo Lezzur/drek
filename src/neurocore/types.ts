@@ -110,6 +110,36 @@ export interface ContentCatalogResponse {
   created: boolean;
 }
 
+/** Build-plan edit signal payload (M33). Captures both the full before/
+ *  after plan and a coarse `changed` summary for cheap pattern queries.
+ *  Sent on every Rick-edit so Neurocore can learn what the LLM gets
+ *  consistently wrong about toolchain + step granularity + shot vocabulary. */
+export interface BuildPlanEditedSignal {
+  briefId: string;
+  originalPlan: TransformedBuildPlanShape;
+  editedPlan: TransformedBuildPlanShape;
+  changed: {
+    goal: boolean;
+    finalProduct: boolean;
+    pinnedTechStack: boolean;
+    toolchain: { added: string[]; removed: string[]; roleEdits: number };
+    buildSteps: { added: number; removed: number; edited: number; totalMinutesDelta: number };
+    shotHints: { added: number; removed: number };
+  };
+  editedAt: string;
+}
+
+/** Wire shape for the build plan in signals. Mirrors the DB schema but
+ *  uses plain JSON types (no zod runtime dependency on the signal layer). */
+export interface TransformedBuildPlanShape {
+  goal: string;
+  finalProduct: string;
+  toolchain: Array<{ name: string; role: string; source: 'given' | 'assumed' }>;
+  buildSteps: Array<{ title: string; description: string; estimatedMinutes: number }>;
+  shotHints: string[];
+  pinnedTechStack: { primary: string; supporting: string[]; rationale: string };
+}
+
 /** ContentCatalog list-row shape — fields the nightly cron needs to
  *  re-aggregate. Mirrors the Neurocore ContentCatalog schema. */
 export interface ContentCatalogListEntry {

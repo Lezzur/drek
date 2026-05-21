@@ -49,6 +49,17 @@ vi.mock('../../src/engine/transform-brief.js', async () => {
   };
 });
 
+const mockEditBuildPlan = vi.fn();
+vi.mock('../../src/intake/edit-build-plan.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../src/intake/edit-build-plan.js')
+  >('../../src/intake/edit-build-plan.js');
+  return {
+    ...actual,
+    editBuildPlan: (...args: unknown[]) => mockEditBuildPlan(...args),
+  };
+});
+
 vi.mock('../../src/neurocore/audience-profiles.js', async () => {
   const actual = await vi.importActual<
     typeof import('../../src/neurocore/audience-profiles.js')
@@ -767,5 +778,97 @@ describe('POST /intake/:id/transform', () => {
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('PERSIST_FAILED');
+  });
+});
+
+// ===========================================================================
+// POST /intake/:id/build-plan (M33 — edit transformed build plan)
+// ===========================================================================
+
+describe('POST /intake/:id/build-plan', () => {
+  const validPayload = {
+    goal: 'Build a Vapi voice bot for inbound lead screening.',
+    finalProduct: 'Live phone call demo with transcript streaming on screen.',
+    toolchain: [{ name: 'Vapi', role: 'voice surface', source: 'given' }],
+    buildSteps: [
+      { title: 'Scaffold', description: 'Create the Vapi assistant config.', estimatedMinutes: 30 },
+      { title: 'Wire webhook', description: 'n8n receives Vapi events.', estimatedMinutes: 30 },
+      { title: 'Live test call', description: 'Place a real call.', estimatedMinutes: 30 },
+    ],
+    shotHints: ['Open Vapi dashboard', 'Show webhook firing', 'Live phone call'],
+    pinnedTechStack: { primary: 'tech_vapi', supporting: [], rationale: 'voice surface' },
+  };
+
+  it('returns ok + signalSent when edit + signal both succeed', async () => {
+    mockEditBuildPlan.mockResolvedValue({
+      brief: fakeBrief({ score: fakeScore() }),
+      signalSent: true,
+    });
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/build-plan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(validPayload),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; signalSent: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.signalSent).toBe(true);
+  });
+
+  it('returns ok + signalSent:false when local edit succeeds but signal fails', async () => {
+    mockEditBuildPlan.mockResolvedValue({
+      brief: fakeBrief({ score: fakeScore() }),
+      signalSent: false,
+      signalError: 'UNREACHABLE: down',
+    });
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/build-plan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(validPayload),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; signalSent: boolean };
+    expect(body.ok).toBe(true);
+    expect(body.signalSent).toBe(false);
+  });
+
+  it('returns 400 when payload fails schema validation', async () => {
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/build-plan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...validPayload, buildSteps: [] }), // empty buildSteps fails min(3)
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_INPUT');
+  });
+
+  it('returns 404 when brief not found', async () => {
+    mockEditBuildPlan.mockRejectedValue(
+      new IntakeError('BRIEF_NOT_FOUND', 'not found', { briefId: 'missing' }),
+    );
+    const app = createApp();
+    const res = await app.request('/intake/missing/build-plan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(validPayload),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 400 when brief has no transformed plan yet', async () => {
+    mockEditBuildPlan.mockRejectedValue(
+      new IntakeError('INVALID_OUTPUT', 'no plan to edit', { briefId: 'brief_abc' }),
+    );
+    const app = createApp();
+    const res = await app.request('/intake/brief_abc/build-plan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(validPayload),
+    });
+    expect(res.status).toBe(400);
   });
 });

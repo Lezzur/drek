@@ -3,6 +3,7 @@ import { logger } from '../logger.js';
 import { NeurocoreError, isRetryable, type NeurocoreErrorCode } from './errors.js';
 import type {
   ApprovedScriptSignal,
+  BuildPlanEditedSignal,
   ContentCatalogCreatePayload,
   ContentCatalogListEntry,
   ContentCatalogResponse,
@@ -192,6 +193,29 @@ export class NeurocoreClient {
    * blocks the local published state transition — Neurocore degradation
    * is non-fatal here, same as sendApprovedScript.
    */
+  /**
+   * Send a `build_plan.edited` learning signal to Neurocore. Fires every
+   * time Rick edits a transformed build plan in DREK. Idempotency key
+   * carries the editedAt timestamp so two edits made within the 24h
+   * idempotency window land as separate signals.
+   *
+   * Failure semantics: best-effort. Edit persistence in Firestore never
+   * blocks on this — the caller catches and logs.
+   */
+  async sendBuildPlanEdited(payload: BuildPlanEditedSignal): Promise<void> {
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'build_plan.edited',
+        payload,
+        occurredAt: payload.editedAt,
+      },
+      { idempotencyKey: `drek-build-plan-edited-${payload.briefId}-${payload.editedAt}` },
+    );
+  }
+
   async sendPublishedScript(payload: PublishedScriptSignal): Promise<void> {
     await this.requestJson<{ signalId: string; queued: boolean }>(
       'POST',

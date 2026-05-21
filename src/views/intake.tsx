@@ -9,8 +9,14 @@ export interface IntakeListPageProps {
   currentStage?: BriefStage;
   /** candidate + vetted count for the pipeline depth warning. */
   queueDepth: number;
+  /** M33: count of build-plan edits Rick has made since DREK started
+   *  tracking. Surfaced in the header so progress toward the M34
+   *  pattern-analysis trigger is always visible. */
+  buildPlanEditCount?: number;
   flash?: LayoutProps['flash'];
 }
+
+const M34_TRIGGER_THRESHOLD = 15;
 
 const STAGE_LABELS: Record<BriefStage, string> = {
   candidate: 'Candidate',
@@ -38,6 +44,35 @@ function formatDate(d: Date): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+const STALE_DAYS = 7;
+
+/**
+ * A brief is "queued" (stale) when its last touch was over STALE_DAYS days
+ * ago AND it's still in a queue stage. This is a UI nudge ("you might have
+ * forgotten about this"), not a learning signal — Neurocore is not told
+ * anything about staleness. Briefs in `published` or `retired` are never
+ * marked stale because the queue stages are the only states Rick cares
+ * about progressing.
+ */
+function isStale(brief: PipelineBrief, now: Date = new Date()): boolean {
+  if (brief.stage === 'published' || brief.stage === 'retired') return false;
+  const ageMs = now.getTime() - brief.updatedAt.getTime();
+  return ageMs >= STALE_DAYS * 24 * 60 * 60 * 1000;
+}
+
+function relativeAge(d: Date, now: Date = new Date()): string {
+  const ageMs = now.getTime() - d.getTime();
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
 }
 
 function scoreColor(aggregate: number): string {
@@ -86,10 +121,11 @@ const COL_GRID =
   'grid-template-columns: 32px 1fr 80px 110px auto; gap:12px; align-items:center;';
 
 const BriefRow: FC<{ brief: PipelineBrief }> = ({ brief }) => {
+  const stale = isStale(brief);
   return (
     <div
       class="card brief-row"
-      style={`padding:12px 16px; margin-bottom:8px; display:grid; ${COL_GRID}`}
+      style={`padding:12px 16px; margin-bottom:8px; display:grid; ${COL_GRID}; ${stale ? 'background:var(--surface-2, var(--surface));' : ''}`}
       data-brief-id={brief.id}
     >
       <input
@@ -107,9 +143,17 @@ const BriefRow: FC<{ brief: PipelineBrief }> = ({ brief }) => {
         >
           {brief.title}
         </a>
-        <div class="muted" style="font-size:12px; margin-top:2px;">
-          {brief.company ? <span>{brief.company} · </span> : null}
-          {formatDate(brief.updatedAt)}
+        <div class="muted" style="font-size:12px; margin-top:2px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          {brief.company ? <span>{brief.company} ·</span> : null}
+          <span title={formatDate(brief.updatedAt)}>{relativeAge(brief.updatedAt)}</span>
+          {stale ? (
+            <span
+              style="font-size:10px; padding:2px 6px; border-radius:4px; background:var(--amber-fg); color:var(--amber-bg, #1a1100); text-transform:uppercase; letter-spacing:0.04em; font-weight:600;"
+              title={`Last touched ${formatDate(brief.updatedAt)} — over ${STALE_DAYS} days ago`}
+            >
+              Queued
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -286,19 +330,49 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
   briefs,
   currentStage,
   queueDepth,
+  buildPlanEditCount = 0,
   flash,
 }) => {
+  const m34Triggered = buildPlanEditCount >= M34_TRIGGER_THRESHOLD;
   return (
     <Layout title="Intake pipeline" flash={flash}>
       <div class="row" style="margin-bottom:8px;">
         <h1 style="margin:0;">Intake pipeline</h1>
         <span class="spacer" />
+        {!m34Triggered ? (
+          <span
+            class="muted"
+            style="font-size:12px; padding:4px 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px;"
+            title="Edits accumulated toward the M34 pattern-analysis trigger. At 15 edits we review the corpus to teach Neurocore Rick's substitution + granularity preferences."
+          >
+            Build-plan edits: {buildPlanEditCount}/{M34_TRIGGER_THRESHOLD}
+          </span>
+        ) : null}
         <a class="btn secondary" href="/intake/new">Add brief</a>
         <a class="btn accent" href="/intake/batch/new">Add batch</a>
       </div>
       <p class="muted" style="margin: 6px 0 16px;">
         Source and vet briefs before promoting them to youtube_advanced plans.
       </p>
+
+      {m34Triggered ? (
+        <div
+          class="flash warn"
+          style="margin-bottom:16px; display:flex; gap:12px; align-items:flex-start;"
+        >
+          <span style="font-size:20px;">🚨</span>
+          <div style="flex:1; line-height:1.5;">
+            <strong>{buildPlanEditCount} build-plan edits reached — time to review the corpus.</strong>
+            <div style="margin-top:4px; font-size:13px; color:var(--ink-2);">
+              You've crossed the M34 trigger threshold ({M34_TRIGGER_THRESHOLD}+ edits).
+              Pull the <code>build_plan.edited</code> signals from Neurocore and
+              look for substitution patterns (e.g., tools you keep swapping) +
+              step-granularity drift. See the email{' '}
+              <em>"Tony — M34 trigger reminder"</em> for the full procedure.
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {queueDepth < 3 ? (
         <div class="flash warn" style="margin-bottom:16px;">

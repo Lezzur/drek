@@ -1,7 +1,7 @@
-# DREK deploy — pull, rebuild, restart, verify.
+# DREK deploy -- pull, rebuild, restart, verify.
 #
 # Why this exists: DREK runs `node dist/index.js` under NSSM. A bare
-# `git pull` + `nssm restart DREK` does NOT pick up source changes —
+# `git pull` + `nssm restart DREK` does NOT pick up source changes --
 # the dist/ has to be rebuilt or the service keeps serving the old
 # compiled JS. We've burned hours on that more than once. Three
 # commands is two too many to remember; this is one.
@@ -38,7 +38,7 @@ if (-not $SkipPull) {
   Write-Host "[1/4] git pull" -ForegroundColor Yellow
   git pull
   if ($LASTEXITCODE -ne 0) {
-    Write-Host "git pull failed — resolve conflicts, then re-run." -ForegroundColor Red
+    Write-Host "git pull failed -- resolve conflicts, then re-run." -ForegroundColor Red
     exit 1
   }
 } else {
@@ -50,7 +50,7 @@ if (-not $SkipBuild) {
   Write-Host "[2/4] npm run build" -ForegroundColor Yellow
   npm run build
   if ($LASTEXITCODE -ne 0) {
-    Write-Host "npm run build failed — fix errors, then re-run." -ForegroundColor Red
+    Write-Host "npm run build failed -- fix errors, then re-run." -ForegroundColor Red
     exit 1
   }
 } else {

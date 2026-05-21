@@ -483,6 +483,18 @@ app.post('/intake/:briefId/transform', async (c) => {
     return c.redirect(`/intake/${briefId}?flash=transformed`, 302);
   } catch (err) {
     if (err instanceof IntakeError) {
+      // Log every IntakeError so failures are visible in service.log
+      // without needing browser devtools. Detail field carries the
+      // structured context (zod errors, retry-attempt counts, etc).
+      logger.warn(
+        {
+          briefId,
+          code: err.code,
+          message: err.message,
+          detail: (err as IntakeError & { detail?: unknown }).detail,
+        },
+        'intake.transform: rejected',
+      );
       if (err.code === 'BRIEF_NOT_FOUND') {
         return c.json({ error: { code: err.code, message: err.message } }, 404);
       }

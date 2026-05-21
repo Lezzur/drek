@@ -419,6 +419,8 @@ describe('polling → full pipeline end-to-end', () => {
     const pendingListing: PendingListing = {
       memoryId: 'mem_1',
       listingId: 'lst_1',
+      listingTitle: 'Backend Engineer at Acme',
+      listingText: 'Show automation work on lead pipelines',
       company: 'Acme',
       role: 'Backend Engineer',
       videoRequirements: 'Show automation work on lead pipelines',

@@ -167,7 +167,9 @@ describe('overrideScore', () => {
   it('persists locally even when the signal fails (best-effort signal-send)', async () => {
     const briefId = await seedScoredBrief();
     const fc = makeFakeClient();
-    fc.failNext(new NeurocoreError('UPSTREAM_5XX', 'temporary glitch'));
+    fc.failNext(
+      new NeurocoreError('SERVER_ERROR', '/v1/memory/signals', 'temporary glitch', 503),
+    );
 
     const edited: BriefScore = { ...ORIGINAL_SCORE, scopeFit: 4, aggregate: 4.25 };
     const result = await overrideScore(briefId, edited, undefined, null, {
@@ -176,7 +178,7 @@ describe('overrideScore', () => {
     });
 
     expect(result.signalSent).toBe(false);
-    expect(result.signalError).toMatch(/UPSTREAM_5XX/);
+    expect(result.signalError).toMatch(/SERVER_ERROR/);
     expect(result.brief.score?.scopeFit).toBe(4);
   });
 

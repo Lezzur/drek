@@ -375,7 +375,7 @@ describe('v2 E2E — long-form happy path', () => {
       },
       asDb(),
     );
-    await createPlanWorkspaceForPlan(plan.id);
+    await createPlanWorkspaceForPlan(plan);
 
     const longForm = await createDeliverable(
       {
@@ -717,8 +717,8 @@ describe('v2 E2E — change-format wipe-and-revert', () => {
         archetype: 'pattern_interrupt',
         scriptText:
           'I almost shipped a bug at 2am. Here is the exact moment Claude Code saved me — and what I changed in my workflow.',
-        predictedRetention: 'high',
-        reasoning: 'opens with a relatable fail moment then promises specific learning',
+        predictedRetention:
+          'high — opens with a relatable fail moment then promises specific learning',
       },
       asDb(),
     );
@@ -799,7 +799,10 @@ describe('v2 E2E — AudienceProfile failure stops pipeline', () => {
     }
     // Force the audience profile fetch to fail.
     audienceProfileGet.mockRejectedValueOnce(
-      new AudienceProfileUnavailableError('developer_longform', 'neurocore 503'),
+      new AudienceProfileUnavailableError(
+        'audience profile developer_longform unavailable (neurocore 503)',
+        503,
+      ),
     );
 
     try {

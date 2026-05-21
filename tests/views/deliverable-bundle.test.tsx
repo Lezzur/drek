@@ -128,7 +128,6 @@ describe('DeliverableBundleView — with deliverables', () => {
   it('renders selected title text from the summary', () => {
     const titleConcept: TitleConcept = {
       id: 'title_x',
-      deliverableId: 'del_lf',
       titleText: 'How I shipped in 60 seconds',
       archetype: 'curiosity_gap',
       reasoning: 'r',
@@ -149,7 +148,6 @@ describe('DeliverableBundleView — with deliverables', () => {
   it('renders selected thumbnail conceptSummary as the thumb hint', () => {
     const thumb: ThumbnailConcept = {
       id: 'thumb_x',
-      deliverableId: 'del_lf',
       composition: 'split: terminal left, headshot right',
       textHook: 'SHIPPED',
       expression: 'relieved',

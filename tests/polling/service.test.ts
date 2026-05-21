@@ -65,6 +65,8 @@ function listing(overrides?: Partial<PendingListing>): PendingListing {
   return {
     memoryId: `mem_${Math.random().toString(36).slice(2, 8)}`,
     listingId: `lst_${Math.random().toString(36).slice(2, 8)}`,
+    listingTitle: 'Backend Engineer at Acme',
+    listingText: 'Show automation work on lead pipelines',
     company: 'Acme',
     role: 'Backend Engineer',
     videoRequirements: 'Show automation work on lead pipelines',

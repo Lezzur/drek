@@ -55,7 +55,12 @@ import { IntakeError } from '../intake/errors.js';
  */
 
 const STEP_NAME = 'transform-brief';
-const DEFAULT_TIMEOUT_MS = 90_000;
+// M35.2: bumped from 90s -> 240s. The phased-build prompt is ~5x the
+// pre-M35 size (catalog + audience + history + phase rules + raw brief),
+// and claude-sonnet-4-6 was consistently timing out at 90s on Rick's
+// host (~145s wall time before SIGKILL, both retries). 240s gives the
+// model real headroom; the retry path then has 480s total budget.
+const DEFAULT_TIMEOUT_MS = 240_000;
 const TARGET_AUDIENCE_ID = 'developer_longform';
 
 export interface TransformBriefOptions {

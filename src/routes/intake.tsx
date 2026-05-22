@@ -80,7 +80,12 @@ const stageTransitionSchema = z.object({
 const promoteSchema = z.object({
   formatProfileId: z.string().min(1, 'format profile is required'),
   audienceProfileId: z.string().min(1, 'audience profile is required'),
-  targetRuntimeSeconds: z.coerce.number().int().min(30).max(3600).optional(),
+  // Blank HTML inputs arrive as "" — coerce that (and null) to undefined so the
+  // optional field actually skips, instead of Number("")===0 failing min(30).
+  targetRuntimeSeconds: z
+    .preprocess((v) => (v === '' || v == null ? undefined : v),
+      z.coerce.number().int().min(30).max(3600))
+    .optional(),
 });
 
 const manualScoreSchema = z.object({

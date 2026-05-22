@@ -229,9 +229,9 @@ const BriefRow: FC<{ brief: PipelineBrief }> = ({ brief }) => {
             Score
           </button>
         ) : null}
-        {brief.stage === 'vetted' && brief.score && !brief.promotedPlanId ? (
+        {brief.score && !brief.promotedPlanId && brief.stage !== 'retired' ? (
           <a class="btn small accent" href={`/intake/${brief.id}`}>
-            Promote
+            Send to pipeline
           </a>
         ) : null}
         {brief.stage !== 'retired' ? (

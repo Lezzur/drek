@@ -202,11 +202,11 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
               hx-post={`/intake/${brief.id}/transform`}
               hx-target="body"
               hx-swap="outerHTML"
-              hx-confirm="Transform this brief into a build plan? The LLM will derive goal + toolchain + build steps + shots. ~60-120s."
+              hx-confirm="Draft a build plan from this brief? The LLM will derive goal + toolchain + build steps + shots. ~60-120s."
               hx-indicator={`#transform-indicator-${brief.id}`}
               hx-disabled-elt="this"
             >
-              Transform → build plan
+              Draft build plan
             </button>
             <span
               class="score-spinner htmx-indicator"
@@ -485,11 +485,11 @@ const TransformPanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
           hx-post={`/intake/${brief.id}/transform`}
           hx-target="body"
           hx-swap="outerHTML"
-          hx-confirm="Re-transform this brief? The current build plan and tech-stack pick will be overwritten."
+          hx-confirm="Re-draft this brief's build plan? The current build plan and tech-stack pick will be overwritten."
           hx-indicator={`#retransform-indicator-${brief.id}`}
           hx-disabled-elt="this"
         >
-          Re-transform
+          Re-draft build plan
         </button>
         <span
           class="score-spinner htmx-indicator"
@@ -750,9 +750,9 @@ const PromoteForm: FC<{
   if (brief.promotedPlanId) {
     return (
       <div class="card" style="margin-bottom:16px;">
-        <h3 class="section-label">Promote to plan</h3>
+        <h3 class="section-label">Send to pipeline</h3>
         <div class="flash ok" style="margin-bottom:0;">
-          Already promoted.{' '}
+          Already sent to pipeline.{' '}
           <a href={`/plans/${brief.promotedPlanId}`}>Open plan &rarr;</a>
         </div>
       </div>
@@ -763,10 +763,10 @@ const PromoteForm: FC<{
 
   return (
     <div class="card" style="margin-bottom:16px;">
-      <h3 class="section-label">Promote to plan</h3>
+      <h3 class="section-label">Send to pipeline</h3>
       {disabled ? (
         <div class="flash warn" style="margin-bottom:12px;">
-          Brief must be scored before promoting.
+          Brief must be scored before sending to the pipeline.
         </div>
       ) : null}
       <form method="post" action={`/intake/${brief.id}/promote`}>
@@ -806,7 +806,7 @@ const PromoteForm: FC<{
           type="submit"
           disabled={disabled}
         >
-          Promote to plan
+          Send to pipeline
         </button>
       </form>
     </div>
@@ -866,17 +866,29 @@ export const BriefDetailPage: FC<BriefDetailPageProps> = ({
             .brief-text-panel[open] .brief-text-toggle::after { content: ' ▴'; }
           ` }} />
 
-          <div class="card" style="margin-bottom:16px;">
-            <h3 class="section-label">Stage transition</h3>
-            <form method="post" action={`/intake/${brief.id}/stage`} class="row" style="gap:8px; flex-wrap:wrap;">
-              <select name="stage" style="font-size:14px;">
-                {(['candidate', 'vetted', 'selected', 'in_production', 'published', 'retired'] as const).map((s) => (
-                  <option value={s} selected={brief.stage === s}>{STAGE_LABELS[s]}</option>
-                ))}
-              </select>
-              <button class="btn small" type="submit">Transition</button>
-            </form>
-          </div>
+          {/* Stage is driven by the natural flow (created → sent to pipeline),
+              never hand-set. The only explicit decision is retiring a brief
+              you don't want — and restoring one if you change your mind. */}
+          {brief.stage === 'retired' ? (
+            <div class="card" style="margin-bottom:16px;">
+              <div class="flash" style="margin-bottom:12px;">This brief is retired.</div>
+              <form method="post" action={`/intake/${brief.id}/stage`}>
+                <input type="hidden" name="stage" value="candidate" />
+                <button class="btn small secondary" type="submit">Restore brief</button>
+              </form>
+            </div>
+          ) : (
+            <div class="card" style="margin-bottom:16px;">
+              <form
+                method="post"
+                action={`/intake/${brief.id}/stage`}
+                onsubmit="return confirm('Retire this brief? It will be hidden from the active queue. You can restore it later.');"
+              >
+                <input type="hidden" name="stage" value="retired" />
+                <button class="btn small secondary" type="submit">Retire brief</button>
+              </form>
+            </div>
+          )}
         </div>
 
         <div>

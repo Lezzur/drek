@@ -142,7 +142,7 @@ describe('BriefDetailPage', () => {
     expect(html).toContain('Developer / Learner');
   });
 
-  it('shows "Already promoted" message when brief has promotedPlanId', () => {
+  it('shows "Already sent to pipeline" message when brief has promotedPlanId', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: fakeBrief({ promotedPlanId: 'plan_xyz', score: fakeScore() }),
@@ -150,7 +150,7 @@ describe('BriefDetailPage', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).toContain('Already promoted');
+    expect(html).toContain('Already sent to pipeline');
     expect(html).toContain('plan_xyz');
     expect(html).toContain('/plans/plan_xyz');
   });
@@ -204,8 +204,8 @@ function samplePlan() {
   };
 }
 
-describe('BriefDetailPage — Transform button (M29-redo)', () => {
-  it('shows the Transform → build plan button when technical-fit gate passes', () => {
+describe('BriefDetailPage — Draft build plan button (M29-redo, renamed in v2.1.2)', () => {
+  it('shows the Draft build plan button when technical-fit gate passes', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: fakeBrief({ score: transformableScore() }),
@@ -213,7 +213,7 @@ describe('BriefDetailPage — Transform button (M29-redo)', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).toContain('Transform → build plan');
+    expect(html).toContain('Draft build plan');
     expect(html).toContain('hx-post="/intake/brief_abc/transform"');
     expect(html).toContain('extract the build plan');
   });
@@ -226,10 +226,10 @@ describe('BriefDetailPage — Transform button (M29-redo)', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).not.toContain('Transform → build plan');
+    expect(html).not.toContain('Draft build plan');
   });
 
-  it('hides the initial Transform button once the brief has a build plan; shows Re-transform instead', () => {
+  it('hides the initial Draft button once the brief has a build plan; shows Re-draft instead', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: fakeBrief({
@@ -241,8 +241,8 @@ describe('BriefDetailPage — Transform button (M29-redo)', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).not.toContain('Transform → build plan');
-    expect(html).toContain('Re-transform');
+    expect(html).not.toContain('Draft build plan');
+    expect(html).toContain('Re-draft build plan');
   });
 });
 
@@ -297,7 +297,7 @@ describe('BriefDetailPage — TransformPanel (build plan)', () => {
     expect(html).toContain('~90 min total');
   });
 
-  it('renders the Re-transform button', () => {
+  it('renders the Re-draft build plan button', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: transformedBrief(),
@@ -305,7 +305,7 @@ describe('BriefDetailPage — TransformPanel (build plan)', () => {
         audienceProfiles: [fakeAudienceProfile()],
       }),
     );
-    expect(html).toContain('Re-transform');
+    expect(html).toContain('Re-draft build plan');
   });
 
   it('does NOT render the panel when the brief has no build plan', () => {
@@ -441,7 +441,7 @@ describe('BriefDetailPage — brief-text panel default state', () => {
   });
 });
 
-describe('BriefDetailPage — Transform/Re-transform loading spinner (M35.1)', () => {
+describe('BriefDetailPage — Transform/Re-draft build plan loading spinner (M35.1)', () => {
   it('Transform button wires hx-indicator + hx-disabled-elt to the spinner span', () => {
     const html = toHtml(
       BriefDetailPage({
@@ -457,7 +457,7 @@ describe('BriefDetailPage — Transform/Re-transform loading spinner (M35.1)', (
     expect(html).toMatch(/score-spinner htmx-indicator[^>]*id="transform-indicator-brief_abc"/);
   });
 
-  it('Re-transform button wires hx-indicator + hx-disabled-elt to the spinner span', () => {
+  it('Re-draft build plan button wires hx-indicator + hx-disabled-elt to the spinner span', () => {
     const html = toHtml(
       BriefDetailPage({
         brief: fakeBrief({

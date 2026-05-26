@@ -132,6 +132,109 @@ const flawedPlan: TransformedBuildPlan = {
   ],
 };
 
+// Same brief, production-realistic plan. Goal/finalProduct in lock-step;
+// OAuth provisioning called out; effort weights the risky steps; explicit
+// risk-handling steps. The critic should produce few or zero findings.
+const cleanPlan: TransformedBuildPlan = {
+  goal:
+    'Build a Claude-powered AI email reply assistant that reads incoming ' +
+    'Gmail threads and surfaces a draft reply in a side panel for the ' +
+    'user to review, edit, and one-click insert into the Gmail compose ' +
+    'window. Human always in the loop — the assistant never sends.',
+  finalProduct:
+    'A local Node/TypeScript service + minimal web UI that reads the ' +
+    'user\'s unread Gmail threads via OAuth, calls Claude with the thread ' +
+    'context, and renders a draft reply the user can edit and click to ' +
+    'paste back into Gmail compose. No auto-send, no background activity.',
+
+  toolchain: [
+    { name: 'Claude API (@anthropic-ai/sdk)', role: 'reply generation', source: 'given' },
+    { name: 'Gmail API (googleapis)', role: 'authenticated inbox read', source: 'given' },
+    { name: 'Google Cloud Console', role: 'OAuth client provisioning + scopes', source: 'assumed' },
+    { name: 'Node.js + TypeScript', role: 'backend runtime', source: 'assumed' },
+    { name: 'Express + minimal HTML', role: 'local review UI on localhost:3000', source: 'assumed' },
+  ],
+
+  buildSteps: [
+    {
+      title: 'Provision a Google Cloud OAuth client',
+      description:
+        'In GCP Console: create project, enable Gmail API, configure OAuth ' +
+        'consent screen (External, testing mode), create OAuth Desktop client. ' +
+        'Download credentials.json. Scope: gmail.readonly only — we never send.',
+      estimatedMinutes: 20,
+    },
+    {
+      title: 'OAuth flow + persist refresh token',
+      description:
+        'Implement the one-time consent flow (open browser, capture code, ' +
+        'exchange for refresh token). Persist refresh token to a gitignored ' +
+        'token.json. Handle the "user denied consent" path explicitly.',
+      estimatedMinutes: 30,
+    },
+    {
+      title: 'Read unread threads from Gmail',
+      description:
+        'Call gmail.users.threads.list with q="is:unread in:inbox -category:promotions" ' +
+        'and fetch full thread bodies. Strip quoted history. Cap at 10 threads ' +
+        'per run to control quota.',
+      estimatedMinutes: 25,
+    },
+    {
+      title: 'Build the Claude reply prompt',
+      description:
+        'Construct a prompt that gives Claude the thread body + user\'s ' +
+        'persona/role + reply guidelines (concise, match tone, never fabricate ' +
+        'meeting times or commitments). Iterate on 5 sample threads.',
+      estimatedMinutes: 45,
+    },
+    {
+      title: 'Generate drafts + handle Claude failures',
+      description:
+        'For each thread, call Claude. Catch timeout, rate-limit (429), and ' +
+        'invalid-output cases. On failure, mark the thread "draft unavailable" ' +
+        'and continue. Never crash the whole batch on one bad thread.',
+      estimatedMinutes: 30,
+    },
+    {
+      title: 'Review UI on localhost',
+      description:
+        'Render the threads + drafts in a simple HTML page. Each card shows: ' +
+        'sender, subject, original snippet, draft, an Edit textarea, a ' +
+        '"Copy to clipboard" button. No send button anywhere — that\'s ' +
+        'the safety story.',
+      estimatedMinutes: 40,
+    },
+    {
+      title: 'Hallucination + wrong-recipient guardrails (demo step)',
+      description:
+        'On screen: show 2 cases where the draft would hallucinate (made-up ' +
+        'meeting time, fabricated invoice number) and explain why the ' +
+        'human-in-the-loop step matters. This is the trust story for the video.',
+      estimatedMinutes: 20,
+    },
+    {
+      title: 'End-to-end run + 5-thread demo',
+      description:
+        'Final live run with 5 representative unread threads. Walk through ' +
+        'editing one draft, copying it into Gmail, and explicitly NOT ' +
+        'clicking send until the human confirms.',
+      estimatedMinutes: 20,
+    },
+  ],
+
+  shotHints: [
+    'GCP Console: OAuth consent screen + Gmail API enable toggle',
+    'Terminal: first refresh-token flow opening browser',
+    'Terminal: 10 threads fetched, drafts streaming in',
+    'Localhost UI: card grid of threads + editable drafts',
+    'Live edit of a draft — typo fix, tone shift',
+    'Copy-to-clipboard button click → paste into Gmail compose',
+    'Hallucination call-out: side-by-side draft vs ground truth',
+    'Final shot: human cursor hovering Gmail Send button (NOT clicked)',
+  ],
+};
+
 const CRITERION_IDS = [
   'scope_honesty',
   'timeline_realism',
@@ -142,11 +245,14 @@ const CRITERION_IDS = [
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
+  const useClean = process.argv.includes('--clean');
+  const plan = useClean ? cleanPlan : flawedPlan;
+  const label = useClean ? 'CLEAN' : 'FLAWED';
   const provider = new StandaloneClaudeProvider();
 
-  console.log('=== Dogfood: AI Email Reply Assistant brief ===');
+  console.log(`=== Dogfood: AI Email Reply Assistant brief (${label} plan) ===`);
   console.log(`Criteria version: ${CRITERIA_VERSION}`);
-  console.log(`Plan steps: ${flawedPlan.buildSteps.length}`);
+  console.log(`Plan steps: ${plan.buildSteps.length}`);
 
   if (dryRun) {
     // Print the prompt that would be sent. Useful when running anywhere
@@ -154,8 +260,9 @@ async function main() {
     const criteria = CRITERION_IDS.map((id) => getCriterion(id)).filter(
       (c): c is NonNullable<ReturnType<typeof getCriterion>> => c !== undefined,
     );
-    const prompt = buildCriticPrompt(flawedPlan, briefGoal, criteria);
-    const promptPath = '/tmp/dogfood-critic-prompt.txt';
+    const prompt = buildCriticPrompt(plan, briefGoal, criteria);
+    const suffix = useClean ? 'clean' : 'flawed';
+    const promptPath = `/tmp/dogfood-critic-prompt-${suffix}.txt`;
     writeFileSync(promptPath, prompt, 'utf8');
     console.log(`\n[dry-run] Wrote ${prompt.length} chars to ${promptPath}`);
     console.log('--- prompt preview (first 60 lines) ---');
@@ -170,7 +277,7 @@ async function main() {
 
   const start = Date.now();
   const out: CritiqueResult | CritiqueUnavailable = await critiquePlan({
-    plan: flawedPlan,
+    plan,
     goalSummary: briefGoal,
     criteriaIds: CRITERION_IDS,
     provider,
@@ -199,7 +306,25 @@ async function main() {
     console.log();
   }
 
-  // Baited-flaw coverage report.
+  if (useClean) {
+    // Clean plan: any finding is potentially a false positive. Report each
+    // by criterion so we can decide whether the criterion's threshold is
+    // too aggressive.
+    console.log('=== Clean-plan report (expected: 0 findings) ===');
+    if (out.findings.length === 0) {
+      console.log('  OK — critic stayed quiet on the clean plan.');
+    } else {
+      console.log(
+        `  WARN — critic emitted ${out.findings.length} findings on a clean plan.`,
+      );
+      console.log(
+        '         Review each: is the criterion catching a real issue or being trigger-happy?',
+      );
+    }
+    return;
+  }
+
+  // Baited-flaw coverage report for the flawed plan.
   const baited = {
     scope_honesty: 'goal/finalProduct mismatch (drafts vs auto-sends)',
     dependency_completeness: 'missing OAuth/GCP provisioning',

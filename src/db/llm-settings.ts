@@ -10,6 +10,10 @@ export const llmSettingsSchema = z.object({
   provider: z.enum(['claude', 'codex']),
   claudeModel: z.string().min(1),
   codexModel: z.string().min(1),
+  /** M36: master switch for the production-realism critic. Default on.
+   *  When false, transform-brief ships the draft plan without critique
+   *  or revisor passes. Old documents without this field default to true. */
+  useCritique: z.boolean().default(true),
 });
 export type LLMSettings = z.infer<typeof llmSettingsSchema>;
 
@@ -19,6 +23,7 @@ function envDefaults(): LLMSettings {
     provider: env.LLM_PROVIDER,
     claudeModel: env.CLAUDE_MODEL,
     codexModel: env.CODEX_MODEL,
+    useCritique: true,
   };
 }
 

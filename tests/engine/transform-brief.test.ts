@@ -398,7 +398,7 @@ describe('transformBrief — gate failures', () => {
   it('throws BRIEF_NOT_FOUND when brief id does not exist', async () => {
     const provider = makeProvider([]);
     try {
-      await transformBrief('nonexistent', { provider, db: asDb() });
+      await transformBrief('nonexistent', { provider, db: asDb(), useCritique: false });
       expect.fail('should throw');
     } catch (err) {
       expect(err).toBeInstanceOf(IntakeError);
@@ -410,7 +410,7 @@ describe('transformBrief — gate failures', () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
     const provider = makeProvider([]);
     try {
-      await transformBrief(brief.id, { provider, db: asDb() });
+      await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
       expect.fail('should throw');
     } catch (err) {
       expect(err).toBeInstanceOf(IntakeError);
@@ -423,7 +423,7 @@ describe('transformBrief — gate failures', () => {
     await patchPipelineBrief(brief.id, { score: LOW_TECHNICAL_FIT_SCORE }, asDb());
     const provider = makeProvider([]);
     try {
-      await transformBrief(brief.id, { provider, db: asDb() });
+      await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
       expect.fail('should throw');
     } catch (err) {
       expect(err).toBeInstanceOf(IntakeError);
@@ -442,7 +442,7 @@ describe('transformBrief — happy path', () => {
     const brief = await createBrief({ title: 'voice bot brief', rawText: 'create a voice bot using vapi' }, asDb());
     await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
     const provider = makeProvider([SAMPLE_TRANSFORM_JSON]);
-    const result = await transformBrief(brief.id, { provider, db: asDb() });
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
 
     expect(result.retried).toBe(false);
     expect(result.brief.transformedBuildPlan).not.toBeNull();
@@ -479,7 +479,7 @@ describe('transformBrief — happy path', () => {
       asDb(),
     );
     const provider = makeProvider([SAMPLE_TRANSFORM_JSON]);
-    const result = await transformBrief(brief.id, { provider, db: asDb() });
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
     expect(result.brief.transformedBuildPlan).not.toBeNull();
   });
 
@@ -487,7 +487,7 @@ describe('transformBrief — happy path', () => {
     const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
     await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
     const provider = makeProvider([MULTIPHASE_TRANSFORM_JSON]);
-    const result = await transformBrief(brief.id, { provider, db: asDb() });
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
     const plan = result.brief.transformedBuildPlan!;
 
     expect(plan.phases).toBeDefined();
@@ -518,7 +518,7 @@ describe('transformBrief — happy path', () => {
       asDb(),
     );
     const provider = makeProvider([MULTIPHASE_TRANSFORM_JSON]);
-    const result = await transformBrief(brief.id, { provider, db: asDb() });
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
     expect(result.brief.transformedBuildPlan).not.toBeNull();
     expect(result.brief.transformedBuildPlan!.phases).toHaveLength(2);
   });
@@ -534,7 +534,7 @@ describe('transformBrief — retry path', () => {
     await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
 
     const provider = makeProvider(['not valid json', SAMPLE_TRANSFORM_JSON]);
-    const result = await transformBrief(brief.id, { provider, db: asDb() });
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
     expect(result.retried).toBe(true);
     expect(result.brief.transformedBuildPlan).not.toBeNull();
   });
@@ -545,7 +545,7 @@ describe('transformBrief — retry path', () => {
 
     const phantomPick = makePlanJsonWithStack('tech_phantom_does_not_exist');
     const provider = makeProvider([phantomPick, SAMPLE_TRANSFORM_JSON]);
-    const result = await transformBrief(brief.id, { provider, db: asDb() });
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
     expect(result.retried).toBe(true);
     expect(result.brief.pinnedTechStack?.primary).toBe('tech_vapi');
   });
@@ -557,7 +557,7 @@ describe('transformBrief — retry path', () => {
     const phantom = makePlanJsonWithStack('tech_phantom');
     const provider = makeProvider([phantom, phantom]);
     try {
-      await transformBrief(brief.id, { provider, db: asDb() });
+      await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
       expect.fail('should throw');
     } catch (err) {
       expect(err).toBeInstanceOf(IntakeError);
@@ -573,7 +573,7 @@ describe('transformBrief — retry path', () => {
       { throws: new LLMProviderError('claude', 'TIMEOUT', 'provider timed out') },
     ]);
     try {
-      await transformBrief(brief.id, { provider, db: asDb() });
+      await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
       expect.fail('should throw');
     } catch (err) {
       expect(err).toBeInstanceOf(IntakeError);
@@ -594,12 +594,205 @@ describe('transformBrief — catalog integration', () => {
     mockTechStacks = [];
     const provider = makeProvider([]);
     try {
-      await transformBrief(brief.id, { provider, db: asDb() });
+      await transformBrief(brief.id, { provider, db: asDb(), useCritique: false });
       expect.fail('should throw');
     } catch (err) {
       expect(err).toBeInstanceOf(IntakeError);
       expect((err as IntakeError).code).toBe('INVALID_OUTPUT');
       expect((err as IntakeError).message).toMatch(/catalog is empty/);
     }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// transformBrief — M36 critique integration
+// -----------------------------------------------------------------------------
+
+describe('transformBrief — M36 critique + revisor integration', () => {
+  function critiqueReply(findings: Array<{
+    criterion_id: string;
+    severity: 'high' | 'medium' | 'low';
+    confidence: 'high' | 'medium' | 'low';
+    issue: string;
+    suggested_fix: string;
+  }>): string {
+    return JSON.stringify({ findings });
+  }
+
+  function revisorReply(opts: {
+    revisedGoal: string;
+    appliedIds: string[];
+    skippedIds: string[];
+    skipReasons: Record<string, string>;
+  }): string {
+    const transformed = JSON.parse(SAMPLE_TRANSFORM_JSON);
+    return JSON.stringify({
+      revised_plan: {
+        goal: opts.revisedGoal,
+        finalProduct: transformed.finalProduct,
+        toolchain: transformed.toolchain,
+        buildSteps: transformed.phases.flatMap((p: { buildSteps: unknown[] }) => p.buildSteps),
+        shotHints: transformed.phases.flatMap((p: { shotHints: unknown[] }) => p.shotHints),
+        phases: transformed.phases,
+      },
+      applied_finding_ids: opts.appliedIds,
+      skipped_finding_ids: opts.skippedIds,
+      skip_reasons: opts.skipReasons,
+    });
+  }
+
+  it('runs critique + revise, persists findings, ships revised plan', async () => {
+    const brief = await createBrief(
+      { title: 'voice bot brief', rawText: 'create a voice bot using vapi' },
+      asDb(),
+    );
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
+
+    // We don't know the persisted finding id yet, so the revisor reply
+    // uses placeholder ids that get filtered out by the hallucination
+    // guard. That's fine for this test — what we're verifying is that
+    // the pipeline DID run critique + revise, persisted findings, and
+    // shipped the revisor's revised plan (the guard's job to drop
+    // hallucinated ids is exercised in revise-plan tests).
+    const provider = makeProvider([
+      SAMPLE_TRANSFORM_JSON,
+      critiqueReply([
+        {
+          criterion_id: 'scope_honesty',
+          severity: 'high',
+          confidence: 'high',
+          issue: 'Goal claims X but build delivers Y.',
+          suggested_fix: 'Scope claim to "proof of concept".',
+        },
+      ]),
+      revisorReply({
+        revisedGoal: 'Build a CLI prototype (proof of concept) demonstrating vapi voice handling.',
+        appliedIds: ['placeholder-revisor-doesnt-know-real-id'],
+        skippedIds: [],
+        skipReasons: {},
+      }),
+    ]);
+
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: true });
+
+    expect(result.critiqueRan).toBe(true);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.criterionId).toBe('scope_honesty');
+    expect(result.findings[0]!.status).toBe('unresolved');
+    // Revised plan shipped (note: revisor's applied_ids didn't match
+    // persisted ids, so revisorAppliedCount stays 0, but the revisedPlan
+    // contents still ship — that's the correct semantic).
+    expect(result.brief.transformedBuildPlan!.goal).toMatch(/proof of concept/);
+  });
+
+  it('ships draft plan unchanged when critique returns no findings', async () => {
+    const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
+
+    const provider = makeProvider([
+      SAMPLE_TRANSFORM_JSON,
+      critiqueReply([]), // critic ran, found nothing
+    ]);
+
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: true });
+
+    expect(result.critiqueRan).toBe(true);
+    expect(result.findings).toEqual([]);
+    expect(result.revisorAppliedCount).toBe(0);
+    // No revisor call should happen → only 2 provider calls consumed.
+    // Final plan is the draft, unchanged.
+    const drafted = JSON.parse(SAMPLE_TRANSFORM_JSON);
+    expect(result.brief.transformedBuildPlan!.goal).toBe(drafted.goal);
+  });
+
+  it('ships draft plan when critique fails to parse, marks critiqueRan=false', async () => {
+    const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
+
+    const provider = makeProvider([
+      SAMPLE_TRANSFORM_JSON,
+      // Critique retries up to 2x on bad JSON.
+      'not json',
+      'still not json',
+      'never json',
+    ]);
+
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: true });
+
+    expect(result.critiqueRan).toBe(false);
+    expect(result.findings).toEqual([]);
+    expect(result.brief.transformedBuildPlan).not.toBeNull();
+  });
+
+  it('persists findings + keeps draft when revisor fails after critique succeeds', async () => {
+    const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
+
+    const provider = makeProvider([
+      SAMPLE_TRANSFORM_JSON,
+      critiqueReply([
+        {
+          criterion_id: 'timeline_realism',
+          severity: 'medium',
+          confidence: 'medium',
+          issue: 'A step is allocated unrealistically short time.',
+          suggested_fix: 'Double the estimate.',
+        },
+      ]),
+      // Revisor retries up to 2x on parse failure.
+      'broken',
+      'still broken',
+      'never JSON',
+    ]);
+
+    const result = await transformBrief(brief.id, { provider, db: asDb(), useCritique: true });
+
+    expect(result.critiqueRan).toBe(true);
+    expect(result.findings).toHaveLength(1);
+    expect(result.revisorAppliedCount).toBe(0);
+    expect(result.revisorReason).toContain('parse_failed');
+    // Draft plan shipped unchanged.
+    const drafted = JSON.parse(SAMPLE_TRANSFORM_JSON);
+    expect(result.brief.transformedBuildPlan!.goal).toBe(drafted.goal);
+  });
+
+  it('wipes old findings on re-transform before persisting new ones', async () => {
+    const brief = await createBrief({ title: 'T', rawText: 'r' }, asDb());
+    await patchPipelineBrief(brief.id, { score: HIGH_SCORE }, asDb());
+
+    // First transform produces 2 findings.
+    const provider1 = makeProvider([
+      SAMPLE_TRANSFORM_JSON,
+      critiqueReply([
+        { criterion_id: 'scope_honesty', severity: 'high', confidence: 'high', issue: 'A', suggested_fix: 'a' },
+        { criterion_id: 'risk_visibility', severity: 'medium', confidence: 'medium', issue: 'B', suggested_fix: 'b' },
+      ]),
+      revisorReply({
+        revisedGoal: 'Build a voice bot prototype that handles inbound calls with vapi.',
+        appliedIds: [],
+        skippedIds: [],
+        skipReasons: {},
+      }),
+    ]);
+    const first = await transformBrief(brief.id, { provider: provider1, db: asDb(), useCritique: true });
+    expect(first.findings).toHaveLength(2);
+
+    // Re-transform with only 1 finding. Old 2 should be wiped, new 1 persisted.
+    const provider2 = makeProvider([
+      SAMPLE_TRANSFORM_JSON,
+      critiqueReply([
+        { criterion_id: 'effort_distribution', severity: 'low', confidence: 'low', issue: 'C', suggested_fix: 'c' },
+      ]),
+      revisorReply({
+        revisedGoal: 'Build a voice bot prototype that handles inbound calls with vapi.',
+        appliedIds: [],
+        skippedIds: [],
+        skipReasons: {},
+      }),
+    ]);
+    const second = await transformBrief(brief.id, { provider: provider2, db: asDb(), useCritique: true });
+
+    expect(second.findings).toHaveLength(1);
+    expect(second.findings[0]!.criterionId).toBe('effort_distribution');
   });
 });

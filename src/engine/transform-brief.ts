@@ -30,6 +30,16 @@ import {
   type StackPerformance,
 } from '../neurocore/stack-performance.js';
 import { IntakeError } from '../intake/errors.js';
+import { getLLMSettings } from '../db/llm-settings.js';
+import { critiquePlan, type CritiqueFinding as CriticFinding } from './critique-plan.js';
+import { revisePlan } from './revise-plan.js';
+import { listCriteriaIds } from './critique-criteria.js';
+import {
+  persistFindings,
+  markAppliedByRevisor,
+  deleteFindingsByBriefId,
+} from '../db/critique-findings.js';
+import type { CritiqueFinding } from '../db/schemas.js';
 
 /**
  * Brief Transformer v2 (M29-redo).
@@ -67,12 +77,28 @@ export interface TransformBriefOptions {
   provider?: LLMProvider;
   db?: Firestore;
   timeoutMs?: number;
+  /** M36: explicit override for the critique toggle. When undefined, falls
+   *  back to getLLMSettings(). Tests inject `false` to skip the critique
+   *  path without needing a real settings doc / GCP env. */
+  useCritique?: boolean;
 }
 
 export interface TransformBriefResult {
   brief: PipelineBrief;
   retried: boolean;
   durationMs: number;
+  /** M36: critique meta. critiqueRan=false means the critic was disabled
+   *  via settings OR it errored out (the draft plan shipped unchanged). */
+  critiqueRan: boolean;
+  /** Persisted findings (status=unresolved for ones the revisor didn't
+   *  apply, applied_by_revisor for ones it did). Empty when critique
+   *  didn't run or the plan passed every criterion. */
+  findings: CritiqueFinding[];
+  /** Number of findings the revisor incorporated into the final plan. */
+  revisorAppliedCount: number;
+  /** When the critic ran but the revisor failed, this records why so
+   *  the UI can surface "critique findings unresolved". */
+  revisorReason: string | null;
 }
 
 /**
@@ -416,7 +442,7 @@ export async function transformBrief(
   // canonical structured form for the accordion UI + per-phase promotion.
   const flattenedSteps = result.phases.flatMap((p) => p.buildSteps);
   const flattenedShots = result.phases.flatMap((p) => p.shotHints);
-  const transformedBuildPlan: TransformedBuildPlan = transformedBuildPlanSchema.parse({
+  const draftPlan: TransformedBuildPlan = transformedBuildPlanSchema.parse({
     goal: result.goal,
     finalProduct: result.finalProduct,
     toolchain: result.toolchain,
@@ -425,13 +451,106 @@ export async function transformBrief(
     phases: result.phases,
   });
 
+  /* ─── M36: production-realism critic + revisor ────────────────────── */
+  // useCritique resolution priority:
+  //   1. Explicit opts.useCritique (tests / programmatic callers)
+  //   2. getLLMSettings().useCritique (UI toggle, defaults true)
+  // Resolving from opts first avoids calling getLLMSettings — and its
+  // transitive GCP env requirement — in tests that don't need critique.
+  const useCritique =
+    opts.useCritique !== undefined
+      ? opts.useCritique
+      : (await getLLMSettings()).useCritique;
+
+  let finalPlan = draftPlan;
+  let persistedFindings: CritiqueFinding[] = [];
+  let critiqueRan = false;
+  let revisorAppliedCount = 0;
+  let revisorReason: string | null = null;
+
+  if (useCritique) {
+    // Re-transform: wipe any findings tied to the previous draft. They
+    // reference an obsolete plan and would mislead the user.
+    await deleteFindingsByBriefId(briefId, opts.db);
+
+    const critique = await critiquePlan({
+      plan: draftPlan,
+      goalSummary: brief.title,
+      criteriaIds: listCriteriaIds(),
+      provider,
+      timeoutMs,
+    });
+
+    if (critique.ran) {
+      critiqueRan = true;
+
+      if (critique.findings.length > 0) {
+        // Persist findings to get canonical Firestore IDs.
+        persistedFindings = await persistFindings(
+          critique.findings.map((f) => ({
+            briefId,
+            criterionId: f.criterionId,
+            severity: f.severity,
+            confidence: f.confidence,
+            issue: f.issue,
+            suggestedFix: f.suggestedFix,
+            stepRef: f.stepRef,
+            criteriaVersion: f.criteriaVersion,
+            modelUsed: critique.modelUsed,
+          })),
+          opts.db,
+        );
+
+        // Map critic UUIDs → canonical IDs before handing to revisor.
+        // Order is preserved by persistFindings (sequential batch).
+        const findingsForRevisor: CriticFinding[] = persistedFindings.map((p) => ({
+          id: p.id,
+          criterionId: p.criterionId,
+          severity: p.severity,
+          confidence: p.confidence,
+          issue: p.issue,
+          suggestedFix: p.suggestedFix,
+          stepRef: p.stepRef,
+          criteriaVersion: p.criteriaVersion,
+        }));
+
+        const revise = await revisePlan({
+          plan: draftPlan,
+          findings: findingsForRevisor,
+          provider,
+          timeoutMs,
+        });
+
+        if (revise.ran) {
+          finalPlan = revise.revisedPlan;
+          revisorAppliedCount = revise.appliedFindingIds.length;
+          if (revise.appliedFindingIds.length > 0) {
+            await markAppliedByRevisor(revise.appliedFindingIds, opts.db);
+          }
+        } else {
+          // Revisor failed — keep draft + findings as unresolved.
+          revisorReason = revise.reason;
+          logger.warn(
+            { briefId, reason: revise.reason, findingsCount: persistedFindings.length },
+            'transform-brief: revisor unavailable, shipping draft plan with findings unresolved',
+          );
+        }
+      }
+    } else {
+      logger.warn(
+        { briefId, reason: critique.reason },
+        'transform-brief: critique unavailable, shipping draft plan unchanged',
+      );
+    }
+  }
+
   let updated: PipelineBrief | null;
   try {
     updated = await patchPipelineBrief(
       briefId,
       {
         pinnedTechStack,
-        transformedBuildPlan,
+        transformedBuildPlan: finalPlan,
       },
       opts.db,
     );
@@ -451,7 +570,7 @@ export async function transformBrief(
   }
 
   const durationMs = Date.now() - t0;
-  const totalEstimateMinutes = transformedBuildPlan.buildSteps.reduce(
+  const totalEstimateMinutes = finalPlan.buildSteps.reduce(
     (sum, s) => sum + s.estimatedMinutes,
     0,
   );
@@ -461,18 +580,26 @@ export async function transformBrief(
       briefId,
       pinnedTechStack: pinnedTechStack.primary,
       retried,
-      phaseCount: transformedBuildPlan.phases?.length ?? 1,
-      buildStepCount: transformedBuildPlan.buildSteps.length,
+      phaseCount: finalPlan.phases?.length ?? 1,
+      buildStepCount: finalPlan.buildSteps.length,
       totalEstimateMinutes,
+      critiqueRan,
+      findingsCount: persistedFindings.length,
+      revisorAppliedCount,
+      revisorReason,
       durationMs,
     },
-    'brief transformed (M35: phased build plan extracted)',
+    'brief transformed (M36: critique + revisor integrated)',
   );
 
   return {
     brief: updated,
     retried,
     durationMs,
+    critiqueRan,
+    findings: persistedFindings,
+    revisorAppliedCount,
+    revisorReason,
   };
 }
 

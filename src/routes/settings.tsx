@@ -15,6 +15,14 @@ const settingsFormSchema = z.object({
   provider: z.enum(['claude', 'codex']),
   claudeModel: z.string().min(1, 'Claude model is required'),
   codexModel: z.string().min(1, 'Codex model is required'),
+  // M36: production-realism critic toggle. Form HTML checkbox arrives as
+  // 'on' when checked and absent when unchecked, so we coerce a string
+  // → boolean here and default to enabled when the field isn't posted at
+  // all (existing forms without the checkbox).
+  useCritique: z
+    .union([z.literal('on'), z.literal('off'), z.boolean(), z.undefined()])
+    .transform((v) => v === undefined || v === 'on' || v === true)
+    .default(true),
 });
 
 app.post('/settings', async (c) => {

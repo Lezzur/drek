@@ -9,6 +9,7 @@ import { makePollingJob } from './polling/service.js';
 import { initializeWriteQueue } from './neurocore/write-queue.js';
 import { refreshStackPerformance } from './cron/refresh-stack-performance.js';
 import { dailyAt } from './lib/scheduler.js';
+import { initModelConfigCache } from './engine/model-config.js';
 
 const env = getEnv();
 const app = createApp();
@@ -75,6 +76,10 @@ serve(
           logger.warn({ err }, 'startup model refresh failed'),
         );
       }, 30_000);
+
+      // Kick off model-config cache boot fetch (background, non-blocking).
+      // DREK will fall back to env defaults if Neurocore is unreachable at boot.
+      initModelConfigCache();
 
       // Recover the Neurocore write queue from disk (if WORKSPACE_ROOT is set)
       // and start the 30s drain worker. Best-effort: a recovery failure

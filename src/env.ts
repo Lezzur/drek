@@ -67,6 +67,15 @@ const envSchema = z.object({
   // matches PRD §4.1. Manual "Check now" from the dashboard bypasses this.
   POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
 
+  // --- M36 model config fallback defaults ------------------------------------
+  // Used when Neurocore is unreachable and no cached config exists. These
+  // mirror the DEFAULT_FUNCTION_MODELS in Neurocore's model-registry.ts so
+  // the spoke can operate in degraded mode with sensible models.
+  DEFAULT_DRAFTER_MODEL: z.string().min(1).default('claude-opus-4-5'),
+  DEFAULT_CRITIC_MODEL: z.string().min(1).default('claude-opus-4-5'),
+  DEFAULT_REVISER_MODEL: z.string().min(1).default('claude-opus-4-5'),
+  DEFAULT_EMBEDDER_MODEL: z.string().min(1).default('text-embedding-3-small'),
+
   // --- v2 Workspace module (M21) --------------------------------------------
   // Absolute path to the directory where per-plan folders are created. Each
   // youtube_advanced plan gets `${WORKSPACE_ROOT}/${planId}-${slug}/` on

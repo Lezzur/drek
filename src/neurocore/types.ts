@@ -165,6 +165,18 @@ export interface TransformedBuildPlanShape {
   pinnedTechStack: { primary: string; supporting: string[]; rationale: string };
 }
 
+/** Response shape from GET /v1/model-config (Neurocore model registry). */
+export interface NeurocoreModelConfigResponse {
+  functions: {
+    drafter: { provider: string; modelId: string };
+    critic: { provider: string; modelId: string };
+    reviser: { provider: string; modelId: string };
+    embedder: { provider: string; modelId: string };
+  };
+  cacheTtlSeconds: number;
+  schemaVersion: 1;
+}
+
 /** ContentCatalog list-row shape — fields the nightly cron needs to
  *  re-aggregate. Mirrors the Neurocore ContentCatalog schema. */
 export interface ContentCatalogListEntry {

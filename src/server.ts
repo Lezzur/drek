@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { logger as honoLogger } from 'hono/logger';
 import { logger } from './logger.js';
+import admin from './routes/admin.js';
 import health from './routes/health.js';
 import models from './routes/models.js';
 import dashboard from './routes/dashboard.js';
@@ -41,6 +42,7 @@ export function createApp(): Hono {
     ),
   );
 
+  app.route('/', admin);
   app.route('/', health);
   app.route('/', models);
   // New-plan forms must be mounted BEFORE plan detail so /plans/new/... beats

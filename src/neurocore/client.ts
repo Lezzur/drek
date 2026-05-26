@@ -8,6 +8,7 @@ import type {
   ContentCatalogListEntry,
   ContentCatalogResponse,
   MemoryContextResponse,
+  NeurocoreModelConfigResponse,
   PendingListing,
   PendingListingsResponse,
   PlanMode,
@@ -275,6 +276,16 @@ export class NeurocoreClient {
       payload,
       { idempotencyKey: `drek-content-catalog-${payload.deliverableId}` },
     );
+  }
+
+  /**
+   * Fetch per-function model config from Neurocore's model registry. Called
+   * by the model-config cache module on boot and every 15 minutes. Returns
+   * the raw Neurocore response; the cache module normalises it into
+   * DREK's ModelConfig shape.
+   */
+  async getModelConfig(): Promise<NeurocoreModelConfigResponse> {
+    return this.requestJson<NeurocoreModelConfigResponse>('GET', '/v1/model-config', null);
   }
 
   /**

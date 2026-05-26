@@ -243,6 +243,34 @@ export async function deleteFindingsByBriefId(
 
 // FIRESTORE-INDEX: critique_findings(status:ASC, severity:ASC, createdAt:DESC)
 /**
+ * List-view badge query: returns a map of `briefId → unresolved count` for
+ * every brief that currently has at least one unresolved finding. Uses
+ * the leftmost prefix of the (status, severity, createdAt) composite
+ * index so no new index is required.
+ *
+ * Bounded at 500 — far above what a healthy operator backlog ever reaches.
+ * If we hit the cap, the list view will under-report counts, which is a
+ * better failure mode than hanging the page.
+ */
+export async function countUnresolvedFindingsByBriefIds(
+  db: Firestore = getDb(),
+): Promise<Map<string, number>> {
+  const snap = await db
+    .collection(COLLECTION)
+    .where('status', '==', 'unresolved')
+    .orderBy('createdAt', 'desc')
+    .limit(500)
+    .get();
+  const counts = new Map<string, number>();
+  for (const d of snap.docs) {
+    const briefId = (d.data() as { briefId?: string }).briefId;
+    if (briefId) counts.set(briefId, (counts.get(briefId) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// FIRESTORE-INDEX: critique_findings(status:ASC, severity:ASC, createdAt:DESC)
+/**
  * Cross-brief query for the future ops dashboard: list unresolved findings
  * at a given severity, newest first. Bounded by `limit` so large
  * unresolved backlogs don't fan out into a huge result set.

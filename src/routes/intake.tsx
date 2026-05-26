@@ -18,6 +18,14 @@ import { transformBrief } from '../engine/transform-brief.js';
 import { editBuildPlan } from '../intake/edit-build-plan.js';
 import { overrideScore } from '../intake/override-score.js';
 import {
+  listFindingsByBriefId,
+  overrideFinding,
+  markResolvedByUser,
+  countUnresolvedFindingsByBriefIds,
+} from '../db/critique-findings.js';
+import { getNeurocoreClient } from '../neurocore/index.js';
+import { NeurocoreError } from '../neurocore/errors.js';
+import {
   pinnedTechStackSchema,
   transformedBuildPlanSchema,
   type PinnedTechStack,
@@ -152,6 +160,22 @@ app.get('/intake', async (c) => {
     );
   }
 
+  // M36 list-view badge: one query for all unresolved findings, group
+  // by briefId in memory. Best-effort — empty map on failure means no
+  // badges, page still renders.
+  let unresolvedCounts: Map<string, number>;
+  try {
+    unresolvedCounts = await countUnresolvedFindingsByBriefIds();
+  } catch (err) {
+    logger.warn(
+      { err: (err as Error).message },
+      'intake: failed to compute unresolved finding counts (badges suppressed)',
+    );
+    unresolvedCounts = new Map();
+  }
+  const findingBadges: Record<string, number> = {};
+  for (const [briefId, count] of unresolvedCounts) findingBadges[briefId] = count;
+
   return c.html(
     <IntakeListPage
       briefs={briefs}
@@ -159,6 +183,7 @@ app.get('/intake', async (c) => {
       queueDepth={queueDepth}
       buildPlanEditCount={buildPlanEditCount}
       scoreOverrideCount={scoreOverrideCount}
+      findingBadges={findingBadges}
     />,
   );
 });
@@ -406,12 +431,16 @@ app.get('/intake/:briefId', async (c) => {
   const flashParam = new URL(c.req.url).searchParams.get('flash');
 
   try {
-    const [brief, formatProfiles, audienceProfiles] = await Promise.all([
+    const [brief, formatProfiles, audienceProfiles, findings] = await Promise.all([
       getBrief(briefId),
       Promise.resolve(listFormatProfiles()),
       getAudienceProfileClient()
         .list()
         .catch(() => []),
+      // Findings are best-effort: a Firestore hiccup shouldn't block the
+      // detail view. Returning [] makes the panel disappear, same as a
+      // brief that hasn't been critiqued yet.
+      listFindingsByBriefId(briefId).catch(() => []),
     ]);
 
     const flash =
@@ -421,6 +450,10 @@ app.get('/intake/:briefId', async (c) => {
         ? { type: 'ok' as const, message: 'Brief transformed — review the build plan below.' }
         : flashParam === 'plan-edited'
         ? { type: 'ok' as const, message: 'Build plan saved. Edit captured as a learning signal.' }
+        : flashParam === 'finding-overridden'
+        ? { type: 'ok' as const, message: 'Finding overridden. The override is captured as a calibration signal.' }
+        : flashParam === 'finding-resolved'
+        ? { type: 'ok' as const, message: 'Finding marked resolved.' }
         : null;
 
     return c.html(
@@ -428,6 +461,7 @@ app.get('/intake/:briefId', async (c) => {
         brief={brief}
         formatProfiles={formatProfiles}
         audienceProfiles={audienceProfiles}
+        findings={findings}
         flash={flash}
       />,
     );
@@ -587,6 +621,91 @@ app.post('/intake/:briefId/build-plan', async (c) => {
     );
     throw err;
   }
+});
+
+// ---------------------------------------------------------------------------
+// POST /intake/:briefId/findings/:findingId/override — M36
+// User explicitly rejects a critique finding. Fires the calibration
+// signal so Neurocore can detect miscalibrated criteria.
+// ---------------------------------------------------------------------------
+
+app.post('/intake/:briefId/findings/:findingId/override', async (c) => {
+  const briefId = c.req.param('briefId');
+  const findingId = c.req.param('findingId');
+
+  let reason: string | null = null;
+  const contentType = c.req.header('content-type') ?? '';
+  if (contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data')) {
+    const form = await c.req.formData();
+    const raw = form.get('reason');
+    reason = typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null;
+  } else if (contentType.includes('application/json')) {
+    const body = (await c.req.json().catch(() => ({}))) as { reason?: string };
+    reason =
+      typeof body.reason === 'string' && body.reason.trim().length > 0
+        ? body.reason.trim()
+        : null;
+  }
+
+  const updated = await overrideFinding(findingId, reason);
+  if (!updated) {
+    return c.json({ error: { code: 'NOT_FOUND', message: `Finding ${findingId} not found` } }, 404);
+  }
+
+  // Fire-and-forget signal. Failure must never block the override.
+  void (async () => {
+    try {
+      await getNeurocoreClient().sendCritiqueFindingOverridden({
+        spoke: 'drek',
+        briefId,
+        findingId: updated.id,
+        criterionId: updated.criterionId,
+        ...(updated.overrideReason ? { reason: updated.overrideReason } : {}),
+        overriddenAt: (updated.overrideAt ?? new Date()).toISOString(),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        {
+          briefId,
+          findingId,
+          signal: 'plan.critique_finding_overridden',
+          err: msg,
+          code: err instanceof NeurocoreError ? err.code : 'UNKNOWN',
+        },
+        'override: signal emit failed (best-effort)',
+      );
+    }
+  })();
+
+  // Form submission → redirect back to the detail view with a flash.
+  // JSON request → return updated finding.
+  if (contentType.includes('application/json')) {
+    return c.json({ finding: updated });
+  }
+  return c.redirect(`/intake/${briefId}?flash=finding-overridden`);
+});
+
+// ---------------------------------------------------------------------------
+// POST /intake/:briefId/findings/:findingId/resolve — M36
+// User addressed the finding manually (separate from the revisor pass).
+// No reason required — the act of marking it resolved is the signal.
+// ---------------------------------------------------------------------------
+
+app.post('/intake/:briefId/findings/:findingId/resolve', async (c) => {
+  const briefId = c.req.param('briefId');
+  const findingId = c.req.param('findingId');
+
+  const updated = await markResolvedByUser(findingId);
+  if (!updated) {
+    return c.json({ error: { code: 'NOT_FOUND', message: `Finding ${findingId} not found` } }, 404);
+  }
+
+  const contentType = c.req.header('content-type') ?? '';
+  if (contentType.includes('application/json')) {
+    return c.json({ finding: updated });
+  }
+  return c.redirect(`/intake/${briefId}?flash=finding-resolved`);
 });
 
 // ---------------------------------------------------------------------------

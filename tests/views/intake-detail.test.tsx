@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BriefDetailPage } from '../../src/views/intake-detail.js';
-import type { PipelineBrief, BriefScore } from '../../src/db/schemas.js';
+import type { PipelineBrief, BriefScore, CritiqueFinding } from '../../src/db/schemas.js';
 import type { FormatProfile } from '../../src/engine/format-profiles/index.js';
 import type { AudienceProfile } from '../../src/neurocore/audience-profiles.js';
 
@@ -472,5 +472,129 @@ describe('BriefDetailPage — Transform/Re-draft build plan loading spinner (M35
     expect(html).toContain('hx-indicator="#retransform-indicator-brief_abc"');
     expect(html).toContain('id="retransform-indicator-brief_abc"');
     expect(html).toMatch(/score-spinner htmx-indicator[^>]*id="retransform-indicator-brief_abc"/);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// M36: Findings panel rendering
+// -----------------------------------------------------------------------------
+
+describe('BriefDetailPage — Findings panel (M36)', () => {
+  function fakeFinding(overrides: Partial<CritiqueFinding> = {}): CritiqueFinding {
+    return {
+      id: 'finding_abc123',
+      briefId: 'brief_abc',
+      criterionId: 'scope_honesty',
+      severity: 'high',
+      confidence: 'high',
+      issue: 'Goal claims X but build delivers Y.',
+      suggestedFix: 'Scope claim to "proof of concept".',
+      stepRef: null,
+      status: 'unresolved',
+      overrideReason: null,
+      overrideAt: null,
+      resolvedAt: null,
+      criteriaVersion: 'v1.2026-05-25',
+      modelUsed: 'claude-opus-4-7',
+      createdAt: new Date('2026-05-26T12:00:00Z'),
+      ...overrides,
+    };
+  }
+
+  it('panel disappears entirely when findings is empty', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({ score: fakeScore() }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+        findings: [],
+      }),
+    );
+    expect(html).not.toContain('Production-realism findings');
+  });
+
+  it('panel disappears when findings prop is omitted entirely', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({ score: fakeScore() }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+      }),
+    );
+    expect(html).not.toContain('Production-realism findings');
+  });
+
+  it('renders a single unresolved finding with criterion name + severity + issue + fix + actions', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({ score: fakeScore() }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+        findings: [fakeFinding()],
+      }),
+    );
+    expect(html).toContain('Production-realism findings');
+    expect(html).toContain('Scope honesty');
+    expect(html).toContain('High');
+    expect(html).toContain('Unresolved');
+    expect(html).toContain('Goal claims X but build delivers Y.');
+    expect(html).toContain('Scope claim to');
+    // Action buttons exist for unresolved findings.
+    expect(html).toContain('/intake/brief_abc/findings/finding_abc123/override');
+    expect(html).toContain('/intake/brief_abc/findings/finding_abc123/resolve');
+  });
+
+  it('shows status label for non-unresolved findings without action buttons', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({ score: fakeScore() }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+        findings: [
+          fakeFinding({
+            id: 'finding_1',
+            status: 'overridden',
+            overrideReason: 'Critic misread the brief.',
+            overrideAt: new Date('2026-05-26T12:30:00Z'),
+          }),
+        ],
+      }),
+    );
+    expect(html).toContain('Overridden');
+    expect(html).toContain('Critic misread the brief.');
+    expect(html).not.toContain('/intake/brief_abc/findings/finding_1/override');
+    expect(html).not.toContain('/intake/brief_abc/findings/finding_1/resolve');
+  });
+
+  it('shows stepRef when present', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({ score: fakeScore() }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+        findings: [fakeFinding({ stepRef: 'Phase 2 step 3' })],
+      }),
+    );
+    expect(html).toContain('Phase 2 step 3');
+  });
+
+  it('summary line counts findings by status', () => {
+    const html = toHtml(
+      BriefDetailPage({
+        brief: fakeBrief({ score: fakeScore() }),
+        formatProfiles: [fakeFormatProfile()],
+        audienceProfiles: [fakeAudienceProfile()],
+        findings: [
+          fakeFinding({ id: 'f1', status: 'unresolved' }),
+          fakeFinding({ id: 'f2', status: 'unresolved' }),
+          fakeFinding({ id: 'f3', status: 'applied_by_revisor' }),
+          fakeFinding({ id: 'f4', status: 'overridden' }),
+        ],
+      }),
+    );
+    expect(html).toContain('4 total');
+    expect(html).toContain('2 unresolved');
+    expect(html).toContain('1 applied by revisor');
+    expect(html).toContain('1 overridden');
   });
 });

@@ -18,6 +18,9 @@ export interface IntakeListPageProps {
    *  as buildPlanEditCount — banner fires at >= 15 so Tony reviews the
    *  score.overridden corpus for scorer bias. */
   scoreOverrideCount?: number;
+  /** M36: per-brief unresolved critique finding counts. Briefs not in
+   *  the map (or with count 0) render no badge. */
+  findingBadges?: Record<string, number>;
   flash?: LayoutProps['flash'];
 }
 
@@ -161,7 +164,33 @@ const StagePills: FC<{ currentStage?: BriefStage }> = ({ currentStage }) => {
 const COL_GRID =
   'grid-template-columns: 32px 1fr 80px 110px 110px auto; gap:12px; align-items:center;';
 
-const BriefRow: FC<{ brief: PipelineBrief }> = ({ brief }) => {
+const FindingsBadge: FC<{ count: number }> = ({ count }) => {
+  if (count <= 0) return null;
+  return (
+    <a
+      href={`/intake/${''}#findings`}
+      title={`${count} unresolved production-realism finding${count === 1 ? '' : 's'}`}
+      style="
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 10px;
+        background: rgba(217, 119, 6, 0.12);
+        color: var(--amber-fg);
+        text-decoration: none;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      "
+    >
+      ⚠ {count} {count === 1 ? 'finding' : 'findings'}
+    </a>
+  );
+};
+
+const BriefRow: FC<{ brief: PipelineBrief; findingsCount?: number }> = ({ brief, findingsCount = 0 }) => {
   const stale = isStale(brief);
   return (
     <div
@@ -195,6 +224,7 @@ const BriefRow: FC<{ brief: PipelineBrief }> = ({ brief }) => {
               Queued
             </span>
           ) : null}
+          {findingsCount > 0 ? <FindingsBadge count={findingsCount} /> : null}
         </div>
       </div>
 
@@ -398,6 +428,7 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
   queueDepth,
   buildPlanEditCount = 0,
   scoreOverrideCount = 0,
+  findingBadges = {},
   flash,
 }) => {
   const m34Triggered = buildPlanEditCount >= M34_TRIGGER_THRESHOLD;
@@ -488,7 +519,9 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
       ) : (
         <>
           <BriefListHeader />
-          {briefs.map((b) => <BriefRow brief={b} />)}
+          {briefs.map((b) => (
+            <BriefRow brief={b} findingsCount={findingBadges[b.id] ?? 0} />
+          ))}
         </>
       )}
       <script dangerouslySetInnerHTML={{ __html: BULK_SCRIPT }} />

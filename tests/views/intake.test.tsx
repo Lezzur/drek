@@ -248,4 +248,68 @@ describe('IntakeListPage', () => {
     // Counter pill hides once the banner takes over
     expect(html).not.toContain('Score overrides: 16/15');
   });
+
+  // ---- M36 findings badge ----
+
+  it('renders no findings badge when findingBadges is empty', () => {
+    const html = toHtml(
+      IntakeListPage({
+        briefs: [fakeBrief({ id: 'brief_x', title: 'X' })],
+        queueDepth: 1,
+      }),
+    );
+    expect(html).not.toContain('findings');
+    expect(html).not.toContain('⚠');
+  });
+
+  it('renders findings badge with singular noun for count of 1', () => {
+    const html = toHtml(
+      IntakeListPage({
+        briefs: [fakeBrief({ id: 'brief_x', title: 'X' })],
+        queueDepth: 1,
+        findingBadges: { brief_x: 1 },
+      }),
+    );
+    expect(html).toContain('1 finding');
+    expect(html).not.toContain('1 findings');
+  });
+
+  it('renders findings badge with plural noun for count > 1', () => {
+    const html = toHtml(
+      IntakeListPage({
+        briefs: [fakeBrief({ id: 'brief_x', title: 'X' })],
+        queueDepth: 1,
+        findingBadges: { brief_x: 3 },
+      }),
+    );
+    expect(html).toContain('3 findings');
+  });
+
+  it('renders badge only on briefs present in findingBadges map', () => {
+    const html = toHtml(
+      IntakeListPage({
+        briefs: [
+          fakeBrief({ id: 'brief_a', title: 'A' }),
+          fakeBrief({ id: 'brief_b', title: 'B' }),
+        ],
+        queueDepth: 2,
+        findingBadges: { brief_a: 2 },
+      }),
+    );
+    expect(html).toContain('2 findings');
+    // Badge appears exactly once (for brief_a), not for brief_b
+    expect((html.match(/findings</g) ?? []).length).toBe(1);
+  });
+
+  it('does not render badge for briefs with count 0 in findingBadges map', () => {
+    const html = toHtml(
+      IntakeListPage({
+        briefs: [fakeBrief({ id: 'brief_x', title: 'X' })],
+        queueDepth: 1,
+        findingBadges: { brief_x: 0 },
+      }),
+    );
+    expect(html).not.toContain('findings');
+    expect(html).not.toContain('⚠');
+  });
 });

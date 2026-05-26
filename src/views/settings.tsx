@@ -96,6 +96,33 @@ const ProviderCard: FC<{ settings: LLMSettings; catalog: ModelCatalog }> = ({
         </label>
       </div>
 
+      <hr style="border:none; border-top:1px solid var(--border); margin:18px 0;" />
+
+      <h3 class="section-label" style="margin-bottom:14px;">Production-realism critic (M36)</h3>
+      <p class="muted" style="font-size:13px; margin-bottom:12px; line-height:1.5;">
+        When enabled, every transformed build plan is reviewed by a separate
+        LLM pass against the v1 criteria catalog (scope honesty, timeline
+        realism, dependency completeness, effort distribution, risk
+        visibility). Findings appear on the brief detail view. You can
+        override or mark them resolved.
+      </p>
+      <label class="row" style="gap:10px; align-items:center; cursor:pointer; padding:8px 0;">
+        <input
+          type="checkbox"
+          name="useCritique"
+          value="on"
+          checked={settings.useCritique}
+          style="width:18px; height:18px; cursor:pointer;"
+        />
+        <span style="font-weight:500;">
+          Enable critic on every transform
+        </span>
+        <span class="muted" style="font-size:12px;">
+          {settings.useCritique ? 'Currently on' : 'Currently off'} —
+          adds ~2 LLM calls per transform (critique + revisor).
+        </span>
+      </label>
+
       <div class="row" style="gap:8px;">
         <button class="btn" type="submit">Save settings</button>
       </div>

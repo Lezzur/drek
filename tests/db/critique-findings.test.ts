@@ -5,6 +5,7 @@ import {
   persistFindings,
   listFindingsByBriefId,
   countUnresolvedFindings,
+  countUnresolvedFindingsByBriefIds,
   overrideFinding,
   markResolvedByUser,
   markAppliedByRevisor,
@@ -224,5 +225,60 @@ describe('listUnresolvedBySeverity', () => {
     // Just exercise the boundary — no assertion needed besides not throwing.
     await expect(listUnresolvedBySeverity('high', 0, asDb())).resolves.toEqual([]);
     await expect(listUnresolvedBySeverity('high', 99999, asDb())).resolves.toEqual([]);
+  });
+});
+
+describe('countUnresolvedFindingsByBriefIds', () => {
+  it('returns empty map when no findings exist', async () => {
+    const counts = await countUnresolvedFindingsByBriefIds(asDb());
+    expect(counts.size).toBe(0);
+  });
+
+  it('groups unresolved findings by briefId with correct counts', async () => {
+    await persistFindings(
+      [
+        mkInput({ briefId: 'brief_a' }),
+        mkInput({ briefId: 'brief_a', criterionId: 'risk_visibility' }),
+        mkInput({ briefId: 'brief_a', criterionId: 'timeline_realism' }),
+        mkInput({ briefId: 'brief_b' }),
+        mkInput({ briefId: 'brief_c' }),
+        mkInput({ briefId: 'brief_c', criterionId: 'risk_visibility' }),
+      ],
+      asDb(),
+    );
+
+    const counts = await countUnresolvedFindingsByBriefIds(asDb());
+    expect(counts.get('brief_a')).toBe(3);
+    expect(counts.get('brief_b')).toBe(1);
+    expect(counts.get('brief_c')).toBe(2);
+  });
+
+  it('excludes findings with non-unresolved status', async () => {
+    const persisted = await persistFindings(
+      [
+        mkInput({ briefId: 'brief_x' }),
+        mkInput({ briefId: 'brief_x', criterionId: 'risk_visibility' }),
+        mkInput({ briefId: 'brief_x', criterionId: 'timeline_realism' }),
+      ],
+      asDb(),
+    );
+    await overrideFinding(persisted[0]!.id, null, asDb());
+    await markAppliedByRevisor([persisted[1]!.id], asDb());
+
+    const counts = await countUnresolvedFindingsByBriefIds(asDb());
+    // Only the third one remains unresolved
+    expect(counts.get('brief_x')).toBe(1);
+  });
+
+  it('omits briefIds with zero unresolved findings entirely (not present in map)', async () => {
+    const persisted = await persistFindings(
+      [mkInput({ briefId: 'brief_y' })],
+      asDb(),
+    );
+    await overrideFinding(persisted[0]!.id, null, asDb());
+
+    const counts = await countUnresolvedFindingsByBriefIds(asDb());
+    expect(counts.has('brief_y')).toBe(false);
+    expect(counts.size).toBe(0);
   });
 });

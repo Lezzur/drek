@@ -36,6 +36,15 @@ export interface ReviseInput {
   findings: CritiqueFinding[];
   provider: LLMProvider;
   timeoutMs?: number;
+  /**
+   * Optional: fires once per orphan finding (input id the revisor forgot to
+   * account for). Caller uses this to emit hallucination signals. Stays
+   * optional so the service has no Neurocore-client coupling.
+   */
+  onReferenceHallucination?: (event: {
+    hallucinatedId: string;
+    expectedSetSize: number;
+  }) => void;
 }
 
 /* ─── Output ───────────────────────────────────────────────────────────── */
@@ -137,6 +146,7 @@ export async function revisePlan(input: ReviseInput): Promise<ReviseResult | Rev
             },
             'revise: finding id forgotten by revisor, defaulting to skipped',
           );
+          input.onReferenceHallucination?.(event);
         },
       });
 

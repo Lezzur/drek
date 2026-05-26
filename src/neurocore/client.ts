@@ -7,13 +7,19 @@ import type {
   ContentCatalogCreatePayload,
   ContentCatalogListEntry,
   ContentCatalogResponse,
+  CritiqueFindingEmittedSignal,
+  CritiqueFindingOverriddenSignal,
+  CritiqueUnavailableSignal,
   MemoryContextResponse,
   NeurocoreModelConfigResponse,
   PendingListing,
   PendingListingsResponse,
   PlanMode,
   PublishedScriptSignal,
+  ReferenceHallucinationSignal,
+  RevisedAfterCritiqueSignal,
   ScoreOverriddenSignal,
+  UserEditedSignal,
 } from './types.js';
 
 const DEFAULT_RETRY_BACKOFF_MS = 2_000;
@@ -253,6 +259,148 @@ export class NeurocoreClient {
         occurredAt: new Date().toISOString(),
       },
       { idempotencyKey: `drek-script-published-${payload.deliverableId}` },
+    );
+  }
+
+  /* ─── M36 Phase 2.7 critique-lifecycle signals ────────────────────── */
+
+  /**
+   * Fire `plan.critique_finding_emitted` — one per persisted finding.
+   * Idempotency keyed on findingId so re-emit (e.g., a retry race) collapses.
+   * Best-effort: caller catches and logs.
+   */
+  async sendCritiqueFindingEmitted(
+    payload: CritiqueFindingEmittedSignal,
+  ): Promise<void> {
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'plan.critique_finding_emitted',
+        payload,
+        occurredAt: new Date().toISOString(),
+      },
+      { idempotencyKey: `drek-finding-emitted-${payload.findingId}` },
+    );
+  }
+
+  /**
+   * Fire `plan.critique_finding_overridden`. Idempotency keyed on findingId
+   * + overriddenAt so an accidental double-click doesn't double-emit.
+   */
+  async sendCritiqueFindingOverridden(
+    payload: CritiqueFindingOverriddenSignal,
+  ): Promise<void> {
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'plan.critique_finding_overridden',
+        payload,
+        occurredAt: payload.overriddenAt,
+      },
+      {
+        idempotencyKey: `drek-finding-overridden-${payload.findingId}-${payload.overriddenAt}`,
+      },
+    );
+  }
+
+  /**
+   * Fire `plan.revised_after_critique` — once per critique run summarizing
+   * how many findings the revisor applied/skipped. Idempotency keyed on
+   * briefId + occurredAt so a re-transform same-second doesn't collapse.
+   */
+  async sendRevisedAfterCritique(
+    payload: RevisedAfterCritiqueSignal,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'plan.revised_after_critique',
+        payload,
+        occurredAt: now,
+      },
+      { idempotencyKey: `drek-revised-${payload.briefId}-${now}` },
+    );
+  }
+
+  /**
+   * Fire `plan.critique_unavailable` when the critic call failed end-to-end.
+   * Distinguishes critic-down from no-findings for the ops dashboard.
+   */
+  async sendCritiqueUnavailable(
+    payload: CritiqueUnavailableSignal,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'plan.critique_unavailable',
+        payload,
+        occurredAt: now,
+      },
+      { idempotencyKey: `drek-critique-unavailable-${payload.briefId}-${now}` },
+    );
+  }
+
+  /**
+   * Fire `plan.user_edited`. Per-field signal — many edits to one plan
+   * produce many signals. Idempotency keyed on briefId + fieldPath +
+   * editedAt so back-to-back saves of the same field within the same
+   * idempotency window collapse.
+   */
+  async sendUserEdited(payload: UserEditedSignal): Promise<void> {
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'plan.user_edited',
+        payload,
+        occurredAt: payload.editedAt,
+      },
+      {
+        idempotencyKey: `drek-user-edited-${payload.briefId}-${payload.fieldPath}-${payload.editedAt}`,
+      },
+    );
+  }
+
+  /**
+   * Fire `llm.reference_hallucination_emitted`. Called from
+   * llm-output-guards callbacks. Idempotency keyed on briefId + operation +
+   * hallucinatedId + timestamp so a single guard pass that catches the same
+   * id twice (shouldn't happen, but defensive) collapses.
+   */
+  async sendReferenceHallucination(
+    payload: ReferenceHallucinationSignal & { briefId?: string },
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const briefScope = payload.briefId ?? 'unscoped';
+    await this.requestJson<{ signalId: string; queued: boolean }>(
+      'POST',
+      '/v1/memory/signals',
+      {
+        appId: APP_ID,
+        signalType: 'llm.reference_hallucination_emitted',
+        payload: {
+          spoke: payload.spoke,
+          operation: payload.operation,
+          hallucinatedId: payload.hallucinatedId,
+          expectedSetSize: payload.expectedSetSize,
+          ...(payload.modelId ? { modelId: payload.modelId } : {}),
+        },
+        occurredAt: now,
+      },
+      {
+        idempotencyKey: `drek-hallucination-${briefScope}-${payload.operation}-${payload.hallucinatedId}-${now}`,
+      },
     );
   }
 

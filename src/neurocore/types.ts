@@ -165,6 +165,70 @@ export interface TransformedBuildPlanShape {
   pinnedTechStack: { primary: string; supporting: string[]; rationale: string };
 }
 
+/* ─── M36 Phase 2.7 critique-lifecycle signal payloads ──────────────── */
+
+/** Reference hallucination (caught by llm-output-guards.ts). Cross-spoke
+ *  by design — payload is generic enough that any spoke can emit it. */
+export interface ReferenceHallucinationSignal {
+  spoke: string;
+  operation: string;
+  hallucinatedId: string;
+  expectedSetSize: number;
+  modelId?: string;
+}
+
+/** One signal per persisted critique finding. Drives the calibration loop. */
+export interface CritiqueFindingEmittedSignal {
+  spoke: string;
+  briefId: string;
+  findingId: string;
+  criterionId: string;
+  severity: 'high' | 'medium' | 'low';
+  confidence: 'high' | 'medium' | 'low';
+  criteriaVersion: string;
+  modelUsed: string;
+}
+
+/** User explicitly rejected a finding via the UI. Required for the
+ *  calibration loop — high override rates flag miscalibrated criteria. */
+export interface CritiqueFindingOverriddenSignal {
+  spoke: string;
+  briefId: string;
+  findingId: string;
+  criterionId: string;
+  reason?: string;
+  overriddenAt: string;
+}
+
+/** Per-critique-run summary: did the revisor apply anything? */
+export interface RevisedAfterCritiqueSignal {
+  spoke: string;
+  briefId: string;
+  findingsCount: number;
+  appliedCount: number;
+  skippedCount: number;
+  modelUsed: string;
+}
+
+/** Critic call failed end-to-end. Distinguishes critic-down from
+ *  no-findings for the operator dashboard. */
+export interface CritiqueUnavailableSignal {
+  spoke: string;
+  briefId: string;
+  reason: string;
+  attemptCount: number;
+}
+
+/** User edited any field on a plan after delivery. */
+export interface UserEditedSignal {
+  spoke: string;
+  briefId: string;
+  fieldPath: string;
+  before?: string;
+  after?: string;
+  editedAt: string;
+}
+
 /** Response shape from GET /v1/model-config (Neurocore model registry). */
 export interface NeurocoreModelConfigResponse {
   functions: {

@@ -40,6 +40,8 @@ import {
   deleteFindingsByBriefId,
 } from '../db/critique-findings.js';
 import type { CritiqueFinding } from '../db/schemas.js';
+import { getNeurocoreClient } from '../neurocore/index.js';
+import { NeurocoreError } from '../neurocore/errors.js';
 
 /**
  * Brief Transformer v2 (M29-redo).
@@ -473,12 +475,49 @@ export async function transformBrief(
     // reference an obsolete plan and would mislead the user.
     await deleteFindingsByBriefId(briefId, opts.db);
 
+    // Signals are fire-and-forget — failure to emit must never block the
+    // transform. emitSignal() centralizes the try/catch and logs failures
+    // so we don't repeat the pattern at every call site.
+    const emitSignal = async <T>(
+      label: string,
+      send: () => Promise<T>,
+    ): Promise<void> => {
+      try {
+        await send();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          {
+            briefId,
+            signal: label,
+            err: msg,
+            code: err instanceof NeurocoreError ? err.code : 'UNKNOWN',
+          },
+          'transform-brief: signal emit failed (best-effort)',
+        );
+      }
+    };
+
+    const onHallucination = (operation: 'critique' | 'revise') =>
+      (event: { hallucinatedId: string; expectedSetSize: number }) => {
+        void emitSignal('llm.reference_hallucination_emitted', () =>
+          getNeurocoreClient().sendReferenceHallucination({
+            spoke: 'drek',
+            operation,
+            hallucinatedId: event.hallucinatedId,
+            expectedSetSize: event.expectedSetSize,
+            briefId,
+          }),
+        );
+      };
+
     const critique = await critiquePlan({
       plan: draftPlan,
       goalSummary: brief.title,
       criteriaIds: listCriteriaIds(),
       provider,
       timeoutMs,
+      onReferenceHallucination: onHallucination('critique'),
     });
 
     if (critique.ran) {
@@ -501,6 +540,23 @@ export async function transformBrief(
           opts.db,
         );
 
+        // Emit one signal per persisted finding (post-persist so findingId
+        // is the canonical Firestore id, not the critic's in-flight UUID).
+        for (const f of persistedFindings) {
+          void emitSignal('plan.critique_finding_emitted', () =>
+            getNeurocoreClient().sendCritiqueFindingEmitted({
+              spoke: 'drek',
+              briefId,
+              findingId: f.id,
+              criterionId: f.criterionId,
+              severity: f.severity,
+              confidence: f.confidence,
+              criteriaVersion: f.criteriaVersion,
+              modelUsed: f.modelUsed,
+            }),
+          );
+        }
+
         // Map critic UUIDs → canonical IDs before handing to revisor.
         // Order is preserved by persistFindings (sequential batch).
         const findingsForRevisor: CriticFinding[] = persistedFindings.map((p) => ({
@@ -519,6 +575,7 @@ export async function transformBrief(
           findings: findingsForRevisor,
           provider,
           timeoutMs,
+          onReferenceHallucination: onHallucination('revise'),
         });
 
         if (revise.ran) {
@@ -527,6 +584,17 @@ export async function transformBrief(
           if (revise.appliedFindingIds.length > 0) {
             await markAppliedByRevisor(revise.appliedFindingIds, opts.db);
           }
+          // One signal per critique run summarizing revisor outcome.
+          void emitSignal('plan.revised_after_critique', () =>
+            getNeurocoreClient().sendRevisedAfterCritique({
+              spoke: 'drek',
+              briefId,
+              findingsCount: persistedFindings.length,
+              appliedCount: revise.appliedFindingIds.length,
+              skippedCount: revise.skippedFindingIds.length,
+              modelUsed: revise.modelUsed,
+            }),
+          );
         } else {
           // Revisor failed — keep draft + findings as unresolved.
           revisorReason = revise.reason;
@@ -540,6 +608,14 @@ export async function transformBrief(
       logger.warn(
         { briefId, reason: critique.reason },
         'transform-brief: critique unavailable, shipping draft plan unchanged',
+      );
+      void emitSignal('plan.critique_unavailable', () =>
+        getNeurocoreClient().sendCritiqueUnavailable({
+          spoke: 'drek',
+          briefId,
+          reason: critique.reason,
+          attemptCount: critique.attemptCount,
+        }),
       );
     }
   }

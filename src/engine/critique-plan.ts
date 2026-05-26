@@ -54,6 +54,16 @@ export interface CritiqueInput {
   provider: LLMProvider;
   /** Override the default 60s per-pass timeout. */
   timeoutMs?: number;
+  /**
+   * Optional: called once per reference-hallucination caught by the guard
+   * (LLM cited a criterion_id not in the requested set). Caller uses this
+   * to emit signals with operation-specific context (briefId, model).
+   * Stays optional so the service has no Neurocore-client coupling.
+   */
+  onReferenceHallucination?: (event: {
+    hallucinatedId: string;
+    expectedSetSize: number;
+  }) => void;
 }
 
 /* ─── Output ───────────────────────────────────────────────────────────── */
@@ -168,6 +178,7 @@ export async function critiquePlan(input: CritiqueInput): Promise<CritiqueResult
             },
             'critique: dropped finding citing unknown criterion id (reference hallucination)',
           );
+          input.onReferenceHallucination?.(event);
         },
       });
       const findings = filtered.kept.map((f) => toDomainFinding(f));

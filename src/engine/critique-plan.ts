@@ -30,6 +30,7 @@ import {
   type Confidence,
   type Severity,
 } from './critique-criteria.js';
+import { filterToKnownReferences } from './llm-output-guards.js';
 import type { TransformedBuildPlan } from '../db/schemas.js';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -153,13 +154,29 @@ export async function critiquePlan(input: CritiqueInput): Promise<CritiqueResult
     const parsed = parseAndValidate(raw);
     if (parsed.ok) {
       const allowed = new Set(criteria.map((c) => c.id));
-      const findings = parsed.value.findings
-        .filter((f) => allowed.has(f.criterion_id))
-        .map((f) => toDomainFinding(f));
+      const filtered = filterToKnownReferences({
+        items: parsed.value.findings,
+        selectId: (f) => f.criterion_id,
+        knownIds: allowed,
+        onHallucination: (event, item) => {
+          logger.warn(
+            {
+              operation: 'critique',
+              hallucinatedCriterionId: event.hallucinatedId,
+              expectedSetSize: event.expectedSetSize,
+              issue: item.issue.slice(0, 120),
+            },
+            'critique: dropped finding citing unknown criterion id (reference hallucination)',
+          );
+        },
+      });
+      const findings = filtered.kept.map((f) => toDomainFinding(f));
 
       logger.info(
         {
           findingsCount: findings.length,
+          droppedCount: filtered.dropped.length,
+          hallucinationRate: filtered.hallucinationRate,
           attempt,
           criteriaCount: criteria.length,
           durationMs: Date.now() - start,

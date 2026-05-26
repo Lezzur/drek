@@ -24,6 +24,7 @@ import { extractJson } from './json-utils.js';
 import { logger } from '../logger.js';
 import { transformedBuildPlanSchema, type TransformedBuildPlan } from '../db/schemas.js';
 import type { CritiqueFinding } from './critique-plan.js';
+import { ensureCompleteCoverage } from './llm-output-guards.js';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_RETRIES = 2;
@@ -123,25 +124,53 @@ export async function revisePlan(input: ReviseInput): Promise<ReviseResult | Rev
 
     const parsed = parseAndValidate(raw);
     if (parsed.ok) {
-      const validFindingIds = new Set(allFindingIds);
-      const applied = parsed.value.applied_finding_ids.filter((id) => validFindingIds.has(id));
-      const skipped = parsed.value.skipped_finding_ids.filter((id) => validFindingIds.has(id));
+      const coverage = ensureCompleteCoverage({
+        appliedIds: parsed.value.applied_finding_ids,
+        skippedIds: parsed.value.skipped_finding_ids,
+        expectedIds: allFindingIds,
+        onOrphan: (event) => {
+          logger.warn(
+            {
+              operation: 'revise',
+              orphanFindingId: event.hallucinatedId,
+              expectedSetSize: event.expectedSetSize,
+            },
+            'revise: finding id forgotten by revisor, defaulting to skipped',
+          );
+        },
+      });
 
-      // Defensive: any finding ID that the LLM neither applied nor skipped
-      // gets implicitly added to skipped with a default reason.
-      const accounted = new Set([...applied, ...skipped]);
-      const missing = allFindingIds.filter((id) => !accounted.has(id));
-      for (const id of missing) skipped.push(id);
+      // Hallucinated ids appearing in applied/skipped that weren't in input
+      // are surfaced by comparing input → after-filter counts.
+      const hallucinatedApplied =
+        parsed.value.applied_finding_ids.length - coverage.applied.length;
+      const hallucinatedSkipped =
+        parsed.value.skipped_finding_ids.length - coverage.skipped.length;
+      if (hallucinatedApplied + hallucinatedSkipped > 0) {
+        logger.warn(
+          {
+            operation: 'revise',
+            hallucinatedApplied,
+            hallucinatedSkipped,
+            expectedSetSize: allFindingIds.length,
+          },
+          'revise: dropped hallucinated finding ids from applied/skipped',
+        );
+      }
 
+      // Orphans default-skip with revisor_did_not_address reason.
       const skipReasons: Record<string, string> = { ...parsed.value.skip_reasons };
-      for (const id of missing) {
+      for (const id of coverage.orphans) {
         if (!(id in skipReasons)) skipReasons[id] = 'revisor_did_not_address';
       }
+      const skipped = [...coverage.skipped, ...coverage.orphans];
 
       logger.info(
         {
-          appliedCount: applied.length,
+          appliedCount: coverage.applied.length,
           skippedCount: skipped.length,
+          orphanCount: coverage.orphans.length,
+          coverageRate: coverage.coverageRate,
           attempt,
           durationMs: Date.now() - start,
         },
@@ -150,7 +179,7 @@ export async function revisePlan(input: ReviseInput): Promise<ReviseResult | Rev
 
       return {
         revisedPlan: parsed.value.revised_plan,
-        appliedFindingIds: applied,
+        appliedFindingIds: coverage.applied,
         skippedFindingIds: skipped,
         skipReasons,
         ran: true,

@@ -777,3 +777,73 @@ export const recordingSessionCreateSchema = recordingSessionSchema
   .omit({ id: true, createdAt: true })
   .partial({ notes: true });
 export type RecordingSessionCreate = z.infer<typeof recordingSessionCreateSchema>;
+
+/* ─── M36: Production-Realism Critique Findings ────────────────────────── */
+
+/** Critique finding severity. Set by the critic, can be adjusted via override. */
+export const CRITIQUE_SEVERITY = ['high', 'medium', 'low'] as const;
+export type CritiqueSeverity = (typeof CRITIQUE_SEVERITY)[number];
+
+/** Critic's confidence that the finding is real. Low confidence findings
+ *  surface as suggestions; high confidence findings as required reviews. */
+export const CRITIQUE_CONFIDENCE = ['high', 'medium', 'low'] as const;
+export type CritiqueConfidence = (typeof CRITIQUE_CONFIDENCE)[number];
+
+/** Lifecycle status of a critique finding.
+ *  - `unresolved`         : critic produced it, no human or revisor action yet
+ *  - `applied_by_revisor` : the revisor incorporated the suggested fix into the plan
+ *  - `overridden`         : user explicitly rejected this finding (critic was wrong)
+ *  - `resolved_by_user`   : user manually addressed it outside the revisor
+ */
+export const CRITIQUE_FINDING_STATUS = [
+  'unresolved',
+  'applied_by_revisor',
+  'overridden',
+  'resolved_by_user',
+] as const;
+export type CritiqueFindingStatus = (typeof CRITIQUE_FINDING_STATUS)[number];
+
+export const critiqueFindingSchema = z.object({
+  id: z.string().min(1),
+  briefId: z.string().min(1),
+  criterionId: z.string().min(1),
+  severity: z.enum(CRITIQUE_SEVERITY),
+  confidence: z.enum(CRITIQUE_CONFIDENCE),
+  issue: z.string().min(1).max(2000),
+  suggestedFix: z.string().min(1).max(2000),
+  /** Optional human-readable reference to the step the finding cites
+   *  (e.g., "Phase 2 step 3"). Null when the finding addresses the plan
+   *  as a whole rather than a specific step. */
+  stepRef: z.string().max(200).nullable(),
+  status: z.enum(CRITIQUE_FINDING_STATUS),
+  /** Free-text reason the user gave when overriding. Required on override
+   *  in the route layer; null on initial persistence. */
+  overrideReason: z.string().max(2000).nullable(),
+  overrideAt: z.date().nullable(),
+  resolvedAt: z.date().nullable(),
+  /** Version of the criteria catalog that produced this finding. Lets
+   *  findings remain interpretable when the catalog evolves. */
+  criteriaVersion: z.string().min(1).max(50),
+  /** Model identifier used by the critic that produced this finding. Lets
+   *  the calibration loop attribute hallucination/quality patterns to
+   *  specific models. */
+  modelUsed: z.string().min(1).max(120),
+  createdAt: z.date(),
+});
+export type CritiqueFinding = z.infer<typeof critiqueFindingSchema>;
+
+/** Input shape for persistence. Caller supplies everything that needs to
+ *  travel from the critic; the store fills in `id`, `status`, `createdAt`,
+ *  `overrideReason`, `overrideAt`, `resolvedAt`. */
+export const critiqueFindingCreateSchema = z.object({
+  briefId: z.string().min(1),
+  criterionId: z.string().min(1),
+  severity: z.enum(CRITIQUE_SEVERITY),
+  confidence: z.enum(CRITIQUE_CONFIDENCE),
+  issue: z.string().min(1).max(2000),
+  suggestedFix: z.string().min(1).max(2000),
+  stepRef: z.string().max(200).nullable().default(null),
+  criteriaVersion: z.string().min(1).max(50),
+  modelUsed: z.string().min(1).max(120),
+});
+export type CritiqueFindingCreate = z.infer<typeof critiqueFindingCreateSchema>;

@@ -281,6 +281,7 @@ async function main() {
     goalSummary: briefGoal,
     criteriaIds: CRITERION_IDS,
     provider,
+    timeoutMs: 180_000, // Opus on a 13K-char prompt regularly takes 60-120s.
     onReferenceHallucination: (citedId) => {
       console.log(`[guard] dropped hallucinated criterion_id: ${citedId}`);
     },

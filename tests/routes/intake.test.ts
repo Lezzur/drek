@@ -60,6 +60,29 @@ vi.mock('../../src/intake/edit-build-plan.js', async () => {
   };
 });
 
+// ---- M36 critique findings mocks ----------------------------------------
+
+const mockOverrideFinding = vi.fn();
+const mockMarkResolvedByUser = vi.fn();
+const mockListFindingsByBriefId = vi.fn();
+const mockCountUnresolvedFindingsByBriefIds = vi.fn();
+
+vi.mock('../../src/db/critique-findings.js', () => ({
+  overrideFinding: (...args: unknown[]) => mockOverrideFinding(...args),
+  markResolvedByUser: (...args: unknown[]) => mockMarkResolvedByUser(...args),
+  listFindingsByBriefId: (...args: unknown[]) => mockListFindingsByBriefId(...args),
+  countUnresolvedFindingsByBriefIds: (...args: unknown[]) =>
+    mockCountUnresolvedFindingsByBriefIds(...args),
+}));
+
+const mockSendCritiqueFindingOverridden = vi.fn();
+vi.mock('../../src/neurocore/index.js', () => ({
+  getNeurocoreClient: () => ({
+    sendCritiqueFindingOverridden: (...args: unknown[]) =>
+      mockSendCritiqueFindingOverridden(...args),
+  }),
+}));
+
 vi.mock('../../src/neurocore/audience-profiles.js', async () => {
   const actual = await vi.importActual<
     typeof import('../../src/neurocore/audience-profiles.js')
@@ -134,6 +157,7 @@ function fakeScore(): BriefScore {
 describe('GET /intake', () => {
   beforeEach(() => {
     mockListBriefs.mockResolvedValue([]);
+    mockCountUnresolvedFindingsByBriefIds.mockResolvedValue(new Map());
   });
 
   it('renders the list page with empty state', async () => {
@@ -870,5 +894,218 @@ describe('POST /intake/:id/build-plan', () => {
       body: JSON.stringify(validPayload),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+// ===========================================================================
+// POST /intake/:briefId/findings/:findingId/override (M36)
+// POST /intake/:briefId/findings/:findingId/resolve (M36)
+// ===========================================================================
+
+function fakeFinding(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'finding_abc',
+    briefId: 'brief_abc',
+    criterionId: 'scope_honesty',
+    severity: 'high' as const,
+    confidence: 'high' as const,
+    issue: 'Goal claims X but build delivers Y.',
+    suggestedFix: 'Scope claim to "proof of concept".',
+    stepRef: null,
+    criteriaVersion: 'v1.2026-05-25',
+    modelUsed: 'claude-opus-4-7',
+    status: 'overridden' as const,
+    overrideReason: 'critic was wrong',
+    overrideAt: new Date('2026-05-26T00:00:00Z'),
+    resolvedAt: null,
+    createdAt: new Date('2026-05-26T00:00:00Z'),
+    ...overrides,
+  };
+}
+
+describe('POST /intake/:briefId/findings/:findingId/override', () => {
+  beforeEach(() => {
+    mockOverrideFinding.mockReset();
+    mockSendCritiqueFindingOverridden.mockReset();
+  });
+
+  it('redirects to detail page with flash=finding-overridden on form submit', async () => {
+    mockOverrideFinding.mockResolvedValue(fakeFinding());
+    mockSendCritiqueFindingOverridden.mockResolvedValue(undefined);
+
+    const form = new FormData();
+    form.set('reason', 'critic was wrong');
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_abc/override',
+      { method: 'POST', body: form },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/intake/brief_abc?flash=finding-overridden');
+    expect(mockOverrideFinding).toHaveBeenCalledWith('finding_abc', 'critic was wrong');
+  });
+
+  it('accepts null reason when form field is empty', async () => {
+    mockOverrideFinding.mockResolvedValue(fakeFinding({ overrideReason: null }));
+    mockSendCritiqueFindingOverridden.mockResolvedValue(undefined);
+
+    const form = new FormData();
+    form.set('reason', '   ');
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_abc/override',
+      { method: 'POST', body: form },
+    );
+
+    expect(res.status).toBe(302);
+    expect(mockOverrideFinding).toHaveBeenCalledWith('finding_abc', null);
+  });
+
+  it('returns JSON with updated finding when content-type is application/json', async () => {
+    mockOverrideFinding.mockResolvedValue(fakeFinding());
+    mockSendCritiqueFindingOverridden.mockResolvedValue(undefined);
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_abc/override',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reason: 'critic was wrong' }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { finding: { id: string; status: string } };
+    expect(body.finding.id).toBe('finding_abc');
+    expect(body.finding.status).toBe('overridden');
+    expect(mockOverrideFinding).toHaveBeenCalledWith('finding_abc', 'critic was wrong');
+  });
+
+  it('accepts null reason from JSON body when omitted', async () => {
+    mockOverrideFinding.mockResolvedValue(fakeFinding({ overrideReason: null }));
+    mockSendCritiqueFindingOverridden.mockResolvedValue(undefined);
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_abc/override',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockOverrideFinding).toHaveBeenCalledWith('finding_abc', null);
+  });
+
+  it('returns 404 when the finding does not exist', async () => {
+    mockOverrideFinding.mockResolvedValue(null);
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_missing/override',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reason: 'x' }),
+      },
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(mockSendCritiqueFindingOverridden).not.toHaveBeenCalled();
+  });
+
+  it('still returns success when the Neurocore signal emit fails (best-effort)', async () => {
+    mockOverrideFinding.mockResolvedValue(fakeFinding());
+    mockSendCritiqueFindingOverridden.mockRejectedValue(new Error('neurocore down'));
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_abc/override',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reason: 'critic was wrong' }),
+      },
+    );
+
+    // Signal fires fire-and-forget — response must not wait for it nor reflect failure.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { finding: { id: string } };
+    expect(body.finding.id).toBe('finding_abc');
+  });
+});
+
+describe('POST /intake/:briefId/findings/:findingId/resolve', () => {
+  beforeEach(() => {
+    mockMarkResolvedByUser.mockReset();
+  });
+
+  it('redirects to detail with flash=finding-resolved on form submit', async () => {
+    mockMarkResolvedByUser.mockResolvedValue(
+      fakeFinding({
+        status: 'resolved_by_user',
+        overrideReason: null,
+        overrideAt: null,
+        resolvedAt: new Date('2026-05-26T00:00:00Z'),
+      }),
+    );
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_abc/resolve',
+      { method: 'POST' },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/intake/brief_abc?flash=finding-resolved');
+    expect(mockMarkResolvedByUser).toHaveBeenCalledWith('finding_abc');
+  });
+
+  it('returns JSON with updated finding when content-type is application/json', async () => {
+    mockMarkResolvedByUser.mockResolvedValue(
+      fakeFinding({
+        status: 'resolved_by_user',
+        overrideReason: null,
+        overrideAt: null,
+        resolvedAt: new Date('2026-05-26T00:00:00Z'),
+      }),
+    );
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_abc/resolve',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { finding: { id: string; status: string } };
+    expect(body.finding.id).toBe('finding_abc');
+    expect(body.finding.status).toBe('resolved_by_user');
+  });
+
+  it('returns 404 when the finding does not exist', async () => {
+    mockMarkResolvedByUser.mockResolvedValue(null);
+
+    const app = createApp();
+    const res = await app.request(
+      '/intake/brief_abc/findings/finding_missing/resolve',
+      { method: 'POST' },
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('NOT_FOUND');
   });
 });

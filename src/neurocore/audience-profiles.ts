@@ -1,29 +1,35 @@
-import { logger } from '../logger.js';
-import { getEnv } from '../env.js';
-import { NeurocoreError, isRetryable } from './errors.js';
+import { NeurocoreError } from './errors.js';
+import { getSharedClient } from './_shared.js';
 
 /**
  * AudienceProfile client — DREK's path to the Neurocore v2
- * AudienceProfile entity. Wraps the same HTTP plumbing as NeurocoreClient
- * (auth, timeout, retry-once) but adds a process-lifetime in-memory cache.
+ * AudienceProfile entity.
  *
- * Cache contract per TECH-SPEC-drek-v2-youtube-2026-05-18.md §4.2 Component F:
- *   - Successful fetch populates the cache for the profile id
- *   - Any fetch failure (timeout, 5xx, 404, JSON parse error) invalidates
- *     the affected cache entry before throwing, so the next attempt
- *     re-fetches cleanly
- *   - clearAudienceProfileCache() is exposed for tests + a future
- *     manual-flush admin route; production steady-state relies on
- *     the auto-invalidate-on-error path
+ * **Phase 2a migration (this file):** this module is now a facade over
+ * `@lezzur/neurocore-client`. The HTTP plumbing (auth, timeout, retry,
+ * cache, invalidate-on-error) all lives in the shared client. This file
+ * preserves DREK's public surface — `AudienceProfile`, the error
+ * subclasses, `AudienceProfileClientImpl`, the singleton getter — so the
+ * 57 call sites across DREK don't have to change yet. They'll move to
+ * direct `@lezzur/neurocore-client` imports in Phase 2d.
  *
- * Failure mode: AudienceProfileUnavailableError and AudienceProfileNotFoundError
- * surface to the engine step that called us. NO fallback to a generic profile.
- * Targeted output is the whole point of the entity — silent fallback defeats it.
+ * Behavior preserved from the pre-migration impl:
+ *   - Strict structural validation on every returned profile (required
+ *     fields + non-empty arrays). The shared client's schema validation
+ *     is more permissive than DREK's — we keep DREK's stricter check
+ *     at this boundary so a sparse payload can't poison downstream
+ *     LLM prompts.
+ *   - `AudienceProfileNotFoundError` on 404 (shared client returns null).
+ *   - `AudienceProfileUnavailableError` on every other failure path,
+ *     after invalidating the cache for the affected id.
+ *
+ * Behavior delegated to the shared client:
+ *   - HTTP transport, auth header, retry with backoff, abort-on-timeout.
+ *   - In-process cache with auto-invalidate-on-error.
+ *   - Concurrent first-read dedup.
  */
 
 const AUDIENCE_PROFILES_PATH = '/v1/audience-profiles';
-const DEFAULT_RETRY_BACKOFF_MS = 2_000;
-const MAX_ATTEMPTS = 2;
 
 export type CtaType =
   | 'subscribe_and_long_form'
@@ -81,38 +87,41 @@ export interface AudienceProfileClient {
 }
 
 export class AudienceProfileClientImpl implements AudienceProfileClient {
-  private readonly baseUrl: string;
-  private readonly token: string | null;
-  private readonly timeoutMs: number;
-  private readonly retryBackoffMs: number;
-  private readonly cache = new Map<string, AudienceProfile>();
+  /**
+   * Track IDs we've returned so `clearAudienceProfileCache()` can fan out
+   * `invalidate(id)` calls to the shared client (which doesn't expose a
+   * clear-all on its EntityReadClient interface).
+   */
+  private readonly seenIds = new Set<string>();
 
-  constructor(opts?: {
+  /**
+   * Backward-compat constructor. Pre-migration callers passed
+   * baseUrl/token/timeout overrides; the shared client now owns all of
+   * that, so these opts are accepted but ignored. Marked unused via
+   * the underscore prefix so the typechecker doesn't complain.
+   *
+   * Phase 2d cleanup: remove this constructor when call sites switch
+   * to importing the shared client directly.
+   */
+  constructor(_opts?: {
     baseUrl?: string;
     token?: string | null;
     timeoutMs?: number;
     retryBackoffMs?: number;
   }) {
-    const env = getEnv();
-    this.baseUrl = (opts?.baseUrl ?? env.NEUROCORE_URL).replace(/\/$/, '');
-    this.token =
-      opts && 'token' in opts ? opts.token ?? null : env.NEUROCORE_TOKEN ?? null;
-    this.timeoutMs = opts?.timeoutMs ?? env.NEUROCORE_TIMEOUT_MS;
-    this.retryBackoffMs = opts?.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+    // intentionally empty — facade has no per-instance HTTP config
   }
 
   async list(): Promise<AudienceProfile[]> {
-    const data = await this.fetchWithRetry<{ profiles: unknown[] }>(
-      'GET',
-      AUDIENCE_PROFILES_PATH,
-    );
-    if (!Array.isArray(data.profiles)) {
-      throw new AudienceProfileUnavailableError(
-        'list response missing profiles array',
-      );
+    const nc = await getSharedClient();
+    let rawProfiles: unknown[];
+    try {
+      rawProfiles = await nc.audienceProfiles.list();
+    } catch (err) {
+      throw translate(err, AUDIENCE_PROFILES_PATH);
     }
-    const profiles = data.profiles.map((raw) => this.parseProfile(raw));
-    for (const p of profiles) this.cache.set(p.id, p);
+    const profiles = rawProfiles.map((raw) => validateProfile(raw));
+    for (const p of profiles) this.seenIds.add(p.id);
     return profiles;
   }
 
@@ -120,203 +129,124 @@ export class AudienceProfileClientImpl implements AudienceProfileClient {
     if (!id) {
       throw new AudienceProfileUnavailableError('id is required');
     }
-    const cached = this.cache.get(id);
-    if (cached) return cached;
-
+    const nc = await getSharedClient();
+    let raw: unknown;
     try {
-      const data = await this.fetchWithRetry<{ profile: unknown }>(
-        'GET',
-        `${AUDIENCE_PROFILES_PATH}/${encodeURIComponent(id)}`,
-      );
-      const profile = this.parseProfile(data.profile);
-      // Defensive: server should return the same id we asked for.
-      if (profile.id !== id) {
-        throw new AudienceProfileUnavailableError(
-          `server returned profile id ${profile.id} for requested ${id}`,
-        );
-      }
-      this.cache.set(id, profile);
-      return profile;
+      raw = await nc.audienceProfiles.get(id);
     } catch (err) {
-      // Always invalidate on any failure path — keeps the cache contract
-      // simple: a cached entry is always a fresh successful read.
-      this.cache.delete(id);
-      if (err instanceof NeurocoreError && err.code === 'NOT_FOUND') {
-        throw new AudienceProfileNotFoundError(id);
-      }
-      throw err;
+      throw translate(err, `${AUDIENCE_PROFILES_PATH}/${id}`, id);
     }
-  }
-
-  // -------------------------------------------------------------------------
-  // Internals — mirror NeurocoreClient.requestJson but with AudienceProfile-
-  // specific error wrapping. Kept private so the cache invariants stay tight.
-  // -------------------------------------------------------------------------
-
-  private async fetchWithRetry<T>(method: 'GET', path: string): Promise<T> {
-    if (!this.token) {
+    if (raw === null) {
+      throw new AudienceProfileNotFoundError(id);
+    }
+    const profile = validateProfile(raw);
+    if (profile.id !== id) {
+      // Shared client already has SERVER_ID_MISMATCH defense, but DREK's
+      // existing contract throws Unavailable here. Surface that explicitly.
       throw new AudienceProfileUnavailableError(
-        'NEUROCORE_TOKEN is not set — cannot call Neurocore',
+        `server returned profile id ${profile.id} for requested ${id}`,
       );
     }
-
-    const url = `${this.baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      Accept: 'application/json',
-    };
-
-    let lastError: NeurocoreError | null = null;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        return await this.attempt<T>(method, url, headers, path);
-      } catch (err) {
-        if (!(err instanceof NeurocoreError)) throw err;
-        lastError = err;
-        if (!isRetryable(err) || attempt === MAX_ATTEMPTS) break;
-        logger.warn(
-          { endpoint: path, attempt, code: err.code },
-          'audience-profile call failed; retrying',
-        );
-        if (this.retryBackoffMs > 0) await sleep(this.retryBackoffMs);
-      }
-    }
-    throw lastError ?? new AudienceProfileUnavailableError('unreachable code path');
+    this.seenIds.add(id);
+    return profile;
   }
 
-  private async attempt<T>(
-    method: 'GET',
-    url: string,
-    headers: Record<string, string>,
-    endpoint: string,
-  ): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    if (typeof timer.unref === 'function') timer.unref();
-
-    let response: Response;
-    try {
-      response = await fetch(url, { method, headers, signal: controller.signal });
-    } catch (err) {
-      const cause = err as Error & { name?: string };
-      if (cause.name === 'AbortError') {
-        throw new NeurocoreError(
-          'TIMEOUT',
-          endpoint,
-          `request exceeded ${this.timeoutMs}ms`,
-        );
-      }
-      throw new NeurocoreError(
-        'UNREACHABLE',
-        endpoint,
-        cause.message || 'fetch failed',
-      );
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if (!response.ok) {
-      const code = statusToCode(response.status);
-      throw new NeurocoreError(
-        code,
-        endpoint,
-        `${response.status} ${response.statusText}`,
-        response.status,
-      );
-    }
-
-    if (response.status === 204) return {} as T;
-
-    try {
-      return (await response.json()) as T;
-    } catch (err) {
-      throw new NeurocoreError(
-        'INVALID_RESPONSE',
-        endpoint,
-        `response was not valid JSON: ${(err as Error).message}`,
-        response.status,
-      );
-    }
-  }
-
-  /**
-   * Strict structural validation. We don't want a bad-shape payload poisoning
-   * downstream LLM prompts, so the check is verbose and explicit.
-   */
-  private parseProfile(raw: unknown): AudienceProfile {
-    if (!raw || typeof raw !== 'object') {
-      throw new AudienceProfileUnavailableError('profile is not an object');
-    }
-    const p = raw as Record<string, unknown>;
-    const required = [
-      'id',
-      'name',
-      'description',
-      'watchPersona',
-      'painPoints',
-      'buyingTriggers',
-      'voiceGuidelines',
-      'hookPatterns',
-      'pacingRules',
-      'ctaStyle',
-      'createdAt',
-      'updatedAt',
-    ] as const;
-    for (const k of required) {
-      if (p[k] === undefined || p[k] === null) {
-        throw new AudienceProfileUnavailableError(`profile missing field: ${k}`);
-      }
-    }
-    if (!Array.isArray(p.painPoints) || p.painPoints.length === 0) {
-      throw new AudienceProfileUnavailableError('profile painPoints empty or not an array');
-    }
-    if (!Array.isArray(p.buyingTriggers) || p.buyingTriggers.length === 0) {
-      throw new AudienceProfileUnavailableError('profile buyingTriggers empty or not an array');
-    }
-    if (!Array.isArray(p.hookPatterns) || p.hookPatterns.length === 0) {
-      throw new AudienceProfileUnavailableError('profile hookPatterns empty or not an array');
-    }
-    return p as unknown as AudienceProfile;
+  /** Internal helper used by clearAudienceProfileCache(). */
+  invalidateAllSeen(): void {
+    // We can't reach into the shared client to peek its cache, so we
+    // invalidate every id we've handed out. New ids fetched after this
+    // will repopulate naturally.
+    void (async () => {
+      const nc = await getSharedClient();
+      for (const id of this.seenIds) nc.audienceProfiles.invalidate(id);
+      this.seenIds.clear();
+    })();
   }
 }
 
-function statusToCode(status: number) {
-  if (status === 401) return 'UNAUTHENTICATED';
-  if (status === 403) return 'FORBIDDEN';
-  if (status === 404) return 'NOT_FOUND';
-  if (status === 429) return 'RATE_LIMITED';
-  if (status === 503) return 'DEGRADED';
-  if (status >= 400 && status < 500) return 'BAD_REQUEST';
-  return 'SERVER_ERROR';
+/**
+ * Translate any shared-client error into the DREK-specific
+ * AudienceProfileUnavailableError shape, so existing catch blocks across
+ * DREK keep matching.
+ */
+function translate(err: unknown, endpoint: string, id?: string): NeurocoreError {
+  if (err instanceof NeurocoreError) return err;
+  // Shared client error: has code + status + message
+  if (err && typeof err === 'object') {
+    const e = err as { code?: string; message?: string; status?: number };
+    const message = e.message ?? 'shared client error';
+    const status = typeof e.status === 'number' ? e.status : null;
+    if (e.code === 'NOT_FOUND' && id !== undefined) {
+      return new AudienceProfileNotFoundError(id);
+    }
+    return new AudienceProfileUnavailableError(message, status);
+  }
+  return new AudienceProfileUnavailableError(String(err));
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (typeof t.unref === 'function') t.unref();
-  });
+/**
+ * Strict structural validation. DREK's downstream LLM prompts depend on
+ * non-empty arrays + presence of every required field, so a partial
+ * server response fails closed here.
+ */
+function validateProfile(raw: unknown): AudienceProfile {
+  if (!raw || typeof raw !== 'object') {
+    throw new AudienceProfileUnavailableError('profile is not an object');
+  }
+  const p = raw as Record<string, unknown>;
+  const required = [
+    'id',
+    'name',
+    'description',
+    'watchPersona',
+    'painPoints',
+    'buyingTriggers',
+    'voiceGuidelines',
+    'hookPatterns',
+    'pacingRules',
+    'ctaStyle',
+    'createdAt',
+    'updatedAt',
+  ] as const;
+  for (const k of required) {
+    if (p[k] === undefined || p[k] === null) {
+      throw new AudienceProfileUnavailableError(`profile missing field: ${k}`);
+    }
+  }
+  if (!Array.isArray(p.painPoints) || p.painPoints.length === 0) {
+    throw new AudienceProfileUnavailableError('profile painPoints empty or not an array');
+  }
+  if (!Array.isArray(p.buyingTriggers) || p.buyingTriggers.length === 0) {
+    throw new AudienceProfileUnavailableError('profile buyingTriggers empty or not an array');
+  }
+  if (!Array.isArray(p.hookPatterns) || p.hookPatterns.length === 0) {
+    throw new AudienceProfileUnavailableError('profile hookPatterns empty or not an array');
+  }
+  return p as unknown as AudienceProfile;
 }
 
 // ---------------------------------------------------------------------------
-// Memoized client + cache controls — matches the NeurocoreClient pattern.
+// Memoized client + cache controls — kept for backward-compatibility with
+// existing call sites across DREK.
 // ---------------------------------------------------------------------------
 
-let cached: AudienceProfileClientImpl | null = null;
+let cachedImpl: AudienceProfileClientImpl | null = null;
 
 export function getAudienceProfileClient(): AudienceProfileClientImpl {
-  if (!cached) cached = new AudienceProfileClientImpl();
-  return cached;
+  if (!cachedImpl) cachedImpl = new AudienceProfileClientImpl();
+  return cachedImpl;
 }
 
-/** Test-only: clear the memoized client so a new env/cache can take effect. */
+/** Test-only: dispose the singleton so the next call rebuilds it. */
 export function _resetAudienceProfileClientForTests(): void {
-  cached = null;
+  cachedImpl = null;
 }
 
-/** Clear the in-memory cache. Exposed for tests + a future admin flush route. */
+/**
+ * Clear the in-memory cache. Pre-migration, this wiped a local Map; now
+ * it fans out `invalidate(id)` calls to the shared client for every id
+ * we've handed back to a caller.
+ */
 export function clearAudienceProfileCache(): void {
-  if (cached) {
-    // Reach into the private cache via a controlled method.
-    (cached as unknown as { cache: Map<string, AudienceProfile> }).cache.clear();
-  }
+  if (cachedImpl) cachedImpl.invalidateAllSeen();
 }

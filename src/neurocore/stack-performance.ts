@@ -1,22 +1,27 @@
-import { logger } from '../logger.js';
-import { getEnv } from '../env.js';
-import { NeurocoreError, isRetryable } from './errors.js';
+import { NeurocoreError } from './errors.js';
+import { getSharedClient } from './_shared.js';
 
 /**
  * StackPerformance client — DREK's read-side path to the Neurocore
- * `stack_performance` entity. Same shape as audience-profiles.ts and
- * tech-stacks.ts: in-memory cache populated on successful read,
- * auto-invalidate on failure, retry-once at the HTTP layer.
+ * `stack_performance` entity.
  *
- * The Brief Transformer reads this once per transform to populate the
- * CHANNEL HISTORY block. The nightly refresh-stack-performance cron
- * WRITES via the existing NeurocoreClient.createStackPerformance path
- * (see stack-performance-writer below) — this module is reads only.
+ * **Phase 2a migration:** facade over `@lezzur/neurocore-client`. Public
+ * surface unchanged so call sites (Brief Transformer CHANNEL HISTORY
+ * block) don't have to move yet.
+ *
+ * Behavior preserved verbatim:
+ *   - get() returns null on 404 (NOT a throw — unlike audience-profiles).
+ *   - Validation rejects sparse entries so a partial payload can't poison
+ *     the prompt.
+ *   - StackPerformanceUnavailableError on every transport failure path.
+ *
+ * Behavior delegated to the shared client:
+ *   - HTTP transport, bearer auth, retry, abort-on-timeout.
+ *   - StackPerformance is configured uncached in the shared client per
+ *     entity-registry; every read is a fresh fetch.
  */
 
 const STACK_PERFORMANCE_PATH = '/v1/stack-performance';
-const DEFAULT_RETRY_BACKOFF_MS = 2_000;
-const MAX_ATTEMPTS = 2;
 
 export interface StackPerformance {
   id: string;
@@ -54,216 +59,104 @@ export interface StackPerformanceClient {
 }
 
 export class StackPerformanceClientImpl implements StackPerformanceClient {
-  private readonly baseUrl: string;
-  private readonly token: string | null;
-  private readonly timeoutMs: number;
-  private readonly retryBackoffMs: number;
-  private readonly cache = new Map<string, StackPerformance>();
-
-  constructor(opts?: {
+  constructor(_opts?: {
     baseUrl?: string;
     token?: string | null;
     timeoutMs?: number;
     retryBackoffMs?: number;
   }) {
-    const env = getEnv();
-    this.baseUrl = (opts?.baseUrl ?? env.NEUROCORE_URL).replace(/\/$/, '');
-    this.token =
-      opts && 'token' in opts ? opts.token ?? null : env.NEUROCORE_TOKEN ?? null;
-    this.timeoutMs = opts?.timeoutMs ?? env.NEUROCORE_TIMEOUT_MS;
-    this.retryBackoffMs = opts?.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+    // Pre-migration constructor opts ignored — shared client owns transport.
   }
 
   async list(): Promise<StackPerformance[]> {
-    const data = await this.fetchWithRetry<{ entries: unknown[] }>(
-      'GET',
-      STACK_PERFORMANCE_PATH,
-    );
-    if (!Array.isArray(data.entries)) {
-      throw new StackPerformanceUnavailableError(
-        'list response missing entries array',
-      );
+    const nc = await getSharedClient();
+    let raw: unknown[];
+    try {
+      raw = await nc.stackPerformance.list();
+    } catch (err) {
+      throw translate(err, STACK_PERFORMANCE_PATH);
     }
-    const entries = data.entries.map((raw) => this.parseEntry(raw));
-    for (const e of entries) this.cache.set(e.techStackProfileId, e);
-    return entries;
+    return raw.map((r) => validateEntry(r));
   }
 
   async get(techStackProfileId: string): Promise<StackPerformance | null> {
     if (!techStackProfileId) {
       throw new StackPerformanceUnavailableError('techStackProfileId is required');
     }
-    const cached = this.cache.get(techStackProfileId);
-    if (cached) return cached;
-
+    const nc = await getSharedClient();
+    let raw: unknown;
     try {
-      const data = await this.fetchWithRetry<{ entry: unknown }>(
-        'GET',
-        `${STACK_PERFORMANCE_PATH}/${encodeURIComponent(techStackProfileId)}`,
-      );
-      const entry = this.parseEntry(data.entry);
-      this.cache.set(techStackProfileId, entry);
-      return entry;
+      raw = await nc.stackPerformance.get(techStackProfileId);
     } catch (err) {
-      this.cache.delete(techStackProfileId);
-      if (err instanceof NeurocoreError && err.code === 'NOT_FOUND') {
-        // 404 here means "this stack hasn't been published yet" — that's
-        // a valid state (the Brief Transformer falls back to "no data
-        // yet" coverage hint). Return null rather than throw.
-        return null;
-      }
-      throw err;
+      throw translate(err, `${STACK_PERFORMANCE_PATH}/${techStackProfileId}`);
     }
-  }
-
-  private async fetchWithRetry<T>(method: 'GET', path: string): Promise<T> {
-    if (!this.token) {
+    // Per DREK's contract, get() returns null on 404 (not a throw).
+    if (raw === null) return null;
+    const entry = validateEntry(raw);
+    if (entry.techStackProfileId !== techStackProfileId) {
       throw new StackPerformanceUnavailableError(
-        'NEUROCORE_TOKEN is not set — cannot call Neurocore',
+        `server returned entry for techStackProfileId ${entry.techStackProfileId}, ` +
+          `expected ${techStackProfileId}`,
       );
     }
-
-    const url = `${this.baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      Accept: 'application/json',
-    };
-
-    let lastError: NeurocoreError | null = null;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        return await this.attempt<T>(method, url, headers, path);
-      } catch (err) {
-        if (!(err instanceof NeurocoreError)) throw err;
-        lastError = err;
-        if (!isRetryable(err) || attempt === MAX_ATTEMPTS) break;
-        logger.warn(
-          { endpoint: path, attempt, code: err.code },
-          'stack-performance call failed; retrying',
-        );
-        if (this.retryBackoffMs > 0) await sleep(this.retryBackoffMs);
-      }
-    }
-    throw (
-      lastError ??
-      new StackPerformanceUnavailableError('unreachable code path')
-    );
-  }
-
-  private async attempt<T>(
-    method: 'GET',
-    url: string,
-    headers: Record<string, string>,
-    endpoint: string,
-  ): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    if (typeof timer.unref === 'function') timer.unref();
-
-    let response: Response;
-    try {
-      response = await fetch(url, { method, headers, signal: controller.signal });
-    } catch (err) {
-      const cause = err as Error & { name?: string };
-      if (cause.name === 'AbortError') {
-        throw new NeurocoreError(
-          'TIMEOUT',
-          endpoint,
-          `request exceeded ${this.timeoutMs}ms`,
-        );
-      }
-      throw new NeurocoreError(
-        'UNREACHABLE',
-        endpoint,
-        cause.message || 'fetch failed',
-      );
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if (!response.ok) {
-      const code = statusToCode(response.status);
-      throw new NeurocoreError(
-        code,
-        endpoint,
-        `${response.status} ${response.statusText}`,
-        response.status,
-      );
-    }
-
-    if (response.status === 204) return {} as T;
-
-    try {
-      return (await response.json()) as T;
-    } catch (err) {
-      throw new NeurocoreError(
-        'INVALID_RESPONSE',
-        endpoint,
-        `response was not valid JSON: ${(err as Error).message}`,
-        response.status,
-      );
-    }
-  }
-
-  private parseEntry(raw: unknown): StackPerformance {
-    if (!raw || typeof raw !== 'object') {
-      throw new StackPerformanceUnavailableError('entry is not an object');
-    }
-    const p = raw as Record<string, unknown>;
-    const required = [
-      'id',
-      'techStackProfileId',
-      'videoCount',
-      'avgViews',
-      'avgWatchTimeSeconds',
-      'avgCtr',
-      'lastComputedAt',
-    ] as const;
-    for (const k of required) {
-      if (p[k] === undefined || p[k] === null) {
-        throw new StackPerformanceUnavailableError(
-          `entry missing field: ${k}`,
-        );
-      }
-    }
-    return p as unknown as StackPerformance;
+    return entry;
   }
 }
 
-function statusToCode(status: number) {
-  if (status === 401) return 'UNAUTHENTICATED';
-  if (status === 403) return 'FORBIDDEN';
-  if (status === 404) return 'NOT_FOUND';
-  if (status === 429) return 'RATE_LIMITED';
-  if (status === 503) return 'DEGRADED';
-  if (status >= 400 && status < 500) return 'BAD_REQUEST';
-  return 'SERVER_ERROR';
+function translate(err: unknown, endpoint: string): NeurocoreError {
+  if (err instanceof NeurocoreError) return err;
+  if (err && typeof err === 'object') {
+    const e = err as { code?: string; message?: string; status?: number };
+    const message = e.message ?? 'shared client error';
+    const status = typeof e.status === 'number' ? e.status : null;
+    return new StackPerformanceUnavailableError(message, status);
+  }
+  return new StackPerformanceUnavailableError(String(err));
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (typeof t.unref === 'function') t.unref();
-  });
+function validateEntry(raw: unknown): StackPerformance {
+  if (!raw || typeof raw !== 'object') {
+    throw new StackPerformanceUnavailableError('entry is not an object');
+  }
+  const e = raw as Record<string, unknown>;
+  const required = [
+    'id',
+    'techStackProfileId',
+    'videoCount',
+    'avgViews',
+    'avgWatchTimeSeconds',
+    'avgCtr',
+    'lastComputedAt',
+  ] as const;
+  for (const k of required) {
+    if (e[k] === undefined || e[k] === null) {
+      throw new StackPerformanceUnavailableError(`entry missing field: ${k}`);
+    }
+  }
+  return e as unknown as StackPerformance;
 }
 
 // ---------------------------------------------------------------------------
-// Memoized client + cache controls.
+// Memoized client + cache controls
 // ---------------------------------------------------------------------------
 
-let cached: StackPerformanceClientImpl | null = null;
+let cachedImpl: StackPerformanceClientImpl | null = null;
 
 export function getStackPerformanceClient(): StackPerformanceClientImpl {
-  if (!cached) cached = new StackPerformanceClientImpl();
-  return cached;
+  if (!cachedImpl) cachedImpl = new StackPerformanceClientImpl();
+  return cachedImpl;
 }
 
 export function _resetStackPerformanceClientForTests(): void {
-  cached = null;
+  cachedImpl = null;
 }
 
+/**
+ * Clear the in-memory cache. Pre-migration this wiped a local Map; now
+ * it's a no-op because the shared client configures StackPerformance as
+ * uncached (every read is fresh). Kept exported for backward-compat with
+ * callers that defensively call it.
+ */
 export function clearStackPerformanceCache(): void {
-  if (cached) {
-    (cached as unknown as { cache: Map<string, StackPerformance> }).cache.clear();
-  }
+  // intentional no-op — shared client is uncached for this entity
 }

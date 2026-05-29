@@ -1,28 +1,33 @@
-import { logger } from '../logger.js';
-import { getEnv } from '../env.js';
-import { NeurocoreError, isRetryable } from './errors.js';
+import { NeurocoreError } from './errors.js';
+import { getSharedClient } from './_shared.js';
 
 /**
  * TechStackProfile client — DREK's path to the Neurocore v2.1
- * tech_stack_profiles entity. Same shape as audience-profiles.ts:
- *   - In-memory cache, populated on successful read.
- *   - Auto-invalidate on any failure path (a cached entry is always a
- *     fresh successful read; never stale-on-error).
- *   - retry-once at the HTTP layer for retryable errors.
+ * tech_stack_profiles entity.
  *
- * The Brief Transformer (Call 11.5) uses `list({ status: 'active' })` once
- * per transform to build the catalog block in the prompt + validates the
- * LLM's pinnedTechStack picks against this same set.
+ * **Phase 2a migration:** this module is now a facade over
+ * `@lezzur/neurocore-client`. The shared client owns HTTP, cache,
+ * retry, and invalidate-on-error. This file preserves DREK's public
+ * surface — types, error subclasses, ClientImpl class, singleton — so
+ * the existing call sites (Brief Transformer, validators) don't have
+ * to change yet.
  *
- * Failure mode: TechStackProfileUnavailableError /
- * TechStackProfileNotFoundError surface to the caller. NO fallback to a
- * hardcoded list — the whole point of moving the catalog into Neurocore
- * is one source of truth; silent fallback defeats it.
+ * Same migration plan as audience-profiles.ts — see _shared.ts.
+ *
+ * Behavior preserved verbatim:
+ *   - Strict structural validation on every returned profile.
+ *   - TechStackProfileNotFoundError on 404 (shared client returns null).
+ *   - TechStackProfileUnavailableError on every other failure path.
+ *   - list() defaults to status='active' so deprecated stacks stay
+ *     hidden from the Brief Transformer prompt.
+ *
+ * Behavior delegated to the shared client:
+ *   - HTTP transport, bearer auth, retry, abort-on-timeout.
+ *   - In-process cache with auto-invalidate-on-error.
+ *   - Concurrent first-read dedup.
  */
 
 const TECH_STACK_PROFILES_PATH = '/v1/tech-stack-profiles';
-const DEFAULT_RETRY_BACKOFF_MS = 2_000;
-const MAX_ATTEMPTS = 2;
 
 export type TechStackCategory =
   | 'voice_bot'
@@ -89,44 +94,33 @@ export interface TechStackProfileClient {
 }
 
 export class TechStackProfileClientImpl implements TechStackProfileClient {
-  private readonly baseUrl: string;
-  private readonly token: string | null;
-  private readonly timeoutMs: number;
-  private readonly retryBackoffMs: number;
-  private readonly cache = new Map<string, TechStackProfile>();
+  private readonly seenIds = new Set<string>();
 
-  constructor(opts?: {
+  constructor(_opts?: {
     baseUrl?: string;
     token?: string | null;
     timeoutMs?: number;
     retryBackoffMs?: number;
   }) {
-    const env = getEnv();
-    this.baseUrl = (opts?.baseUrl ?? env.NEUROCORE_URL).replace(/\/$/, '');
-    this.token =
-      opts && 'token' in opts ? opts.token ?? null : env.NEUROCORE_TOKEN ?? null;
-    this.timeoutMs = opts?.timeoutMs ?? env.NEUROCORE_TIMEOUT_MS;
-    this.retryBackoffMs = opts?.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+    // Backward-compat: pre-migration constructor opts ignored; the
+    // shared client owns transport config. Phase 2d removes this.
   }
 
   async list(opts: ListTechStackProfilesOpts = {}): Promise<TechStackProfile[]> {
     const status = opts.status ?? 'active';
-    const path =
-      status === 'active'
-        ? TECH_STACK_PROFILES_PATH
-        : `${TECH_STACK_PROFILES_PATH}?status=${status}`;
-    const data = await this.fetchWithRetry<{ profiles: unknown[] }>('GET', path);
-    if (!Array.isArray(data.profiles)) {
-      throw new TechStackProfileUnavailableError(
-        'list response missing profiles array',
-      );
+    const nc = await getSharedClient();
+    let raw: unknown[];
+    try {
+      // Shared client's list() takes an optional filter map. Server filters
+      // by status server-side when status !== 'all'.
+      raw = status === 'all'
+        ? await nc.techStackProfiles.list()
+        : await nc.techStackProfiles.list({ status });
+    } catch (err) {
+      throw translate(err, TECH_STACK_PROFILES_PATH);
     }
-    const profiles = data.profiles.map((raw) => this.parseProfile(raw));
-    // Only cache active profiles (the default fetch path) to keep the
-    // cache from drifting between filtered and unfiltered list calls.
-    if (status === 'active') {
-      for (const p of profiles) this.cache.set(p.id, p);
-    }
+    const profiles = raw.map((r) => validateProfile(r));
+    for (const p of profiles) this.seenIds.add(p.id);
     return profiles;
   }
 
@@ -134,190 +128,93 @@ export class TechStackProfileClientImpl implements TechStackProfileClient {
     if (!id) {
       throw new TechStackProfileUnavailableError('id is required');
     }
-    const cached = this.cache.get(id);
-    if (cached) return cached;
-
+    const nc = await getSharedClient();
+    let raw: unknown;
     try {
-      const data = await this.fetchWithRetry<{ profile: unknown }>(
-        'GET',
-        `${TECH_STACK_PROFILES_PATH}/${encodeURIComponent(id)}`,
-      );
-      const profile = this.parseProfile(data.profile);
-      if (profile.id !== id) {
-        throw new TechStackProfileUnavailableError(
-          `server returned profile id ${profile.id} for requested ${id}`,
-        );
-      }
-      this.cache.set(id, profile);
-      return profile;
+      raw = await nc.techStackProfiles.get(id);
     } catch (err) {
-      this.cache.delete(id);
-      if (err instanceof NeurocoreError && err.code === 'NOT_FOUND') {
-        throw new TechStackProfileNotFoundError(id);
-      }
-      throw err;
+      throw translate(err, `${TECH_STACK_PROFILES_PATH}/${id}`, id);
     }
-  }
-
-  private async fetchWithRetry<T>(method: 'GET', path: string): Promise<T> {
-    if (!this.token) {
+    if (raw === null) throw new TechStackProfileNotFoundError(id);
+    const profile = validateProfile(raw);
+    if (profile.id !== id) {
       throw new TechStackProfileUnavailableError(
-        'NEUROCORE_TOKEN is not set — cannot call Neurocore',
+        `server returned profile id ${profile.id} for requested ${id}`,
       );
     }
-
-    const url = `${this.baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      Accept: 'application/json',
-    };
-
-    let lastError: NeurocoreError | null = null;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        return await this.attempt<T>(method, url, headers, path);
-      } catch (err) {
-        if (!(err instanceof NeurocoreError)) throw err;
-        lastError = err;
-        if (!isRetryable(err) || attempt === MAX_ATTEMPTS) break;
-        logger.warn(
-          { endpoint: path, attempt, code: err.code },
-          'tech-stack-profile call failed; retrying',
-        );
-        if (this.retryBackoffMs > 0) await sleep(this.retryBackoffMs);
-      }
-    }
-    throw (
-      lastError ??
-      new TechStackProfileUnavailableError('unreachable code path')
-    );
+    this.seenIds.add(id);
+    return profile;
   }
 
-  private async attempt<T>(
-    method: 'GET',
-    url: string,
-    headers: Record<string, string>,
-    endpoint: string,
-  ): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    if (typeof timer.unref === 'function') timer.unref();
-
-    let response: Response;
-    try {
-      response = await fetch(url, { method, headers, signal: controller.signal });
-    } catch (err) {
-      const cause = err as Error & { name?: string };
-      if (cause.name === 'AbortError') {
-        throw new NeurocoreError(
-          'TIMEOUT',
-          endpoint,
-          `request exceeded ${this.timeoutMs}ms`,
-        );
-      }
-      throw new NeurocoreError(
-        'UNREACHABLE',
-        endpoint,
-        cause.message || 'fetch failed',
-      );
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if (!response.ok) {
-      const code = statusToCode(response.status);
-      throw new NeurocoreError(
-        code,
-        endpoint,
-        `${response.status} ${response.statusText}`,
-        response.status,
-      );
-    }
-
-    if (response.status === 204) return {} as T;
-
-    try {
-      return (await response.json()) as T;
-    } catch (err) {
-      throw new NeurocoreError(
-        'INVALID_RESPONSE',
-        endpoint,
-        `response was not valid JSON: ${(err as Error).message}`,
-        response.status,
-      );
-    }
-  }
-
-  private parseProfile(raw: unknown): TechStackProfile {
-    if (!raw || typeof raw !== 'object') {
-      throw new TechStackProfileUnavailableError('profile is not an object');
-    }
-    const p = raw as Record<string, unknown>;
-    const required = [
-      'id',
-      'name',
-      'category',
-      'ecosystem',
-      'popularityTier',
-      'filmableNotes',
-      'exampleUseCases',
-      'status',
-      'createdAt',
-      'updatedAt',
-    ] as const;
-    for (const k of required) {
-      if (p[k] === undefined || p[k] === null) {
-        throw new TechStackProfileUnavailableError(`profile missing field: ${k}`);
-      }
-    }
-    if (!Array.isArray(p.ecosystem)) {
-      throw new TechStackProfileUnavailableError('profile ecosystem not an array');
-    }
-    if (!Array.isArray(p.exampleUseCases) || p.exampleUseCases.length === 0) {
-      throw new TechStackProfileUnavailableError(
-        'profile exampleUseCases empty or not an array',
-      );
-    }
-    return p as unknown as TechStackProfile;
+  invalidateAllSeen(): void {
+    void (async () => {
+      const nc = await getSharedClient();
+      for (const id of this.seenIds) nc.techStackProfiles.invalidate(id);
+      this.seenIds.clear();
+    })();
   }
 }
 
-function statusToCode(status: number) {
-  if (status === 401) return 'UNAUTHENTICATED';
-  if (status === 403) return 'FORBIDDEN';
-  if (status === 404) return 'NOT_FOUND';
-  if (status === 429) return 'RATE_LIMITED';
-  if (status === 503) return 'DEGRADED';
-  if (status >= 400 && status < 500) return 'BAD_REQUEST';
-  return 'SERVER_ERROR';
+function translate(err: unknown, endpoint: string, id?: string): NeurocoreError {
+  if (err instanceof NeurocoreError) return err;
+  if (err && typeof err === 'object') {
+    const e = err as { code?: string; message?: string; status?: number };
+    const message = e.message ?? 'shared client error';
+    const status = typeof e.status === 'number' ? e.status : null;
+    if (e.code === 'NOT_FOUND' && id !== undefined) {
+      return new TechStackProfileNotFoundError(id);
+    }
+    return new TechStackProfileUnavailableError(message, status);
+  }
+  return new TechStackProfileUnavailableError(String(err));
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (typeof t.unref === 'function') t.unref();
-  });
+function validateProfile(raw: unknown): TechStackProfile {
+  if (!raw || typeof raw !== 'object') {
+    throw new TechStackProfileUnavailableError('profile is not an object');
+  }
+  const p = raw as Record<string, unknown>;
+  const required = [
+    'id',
+    'name',
+    'category',
+    'ecosystem',
+    'popularityTier',
+    'filmableNotes',
+    'exampleUseCases',
+    'status',
+    'createdAt',
+    'updatedAt',
+  ] as const;
+  for (const k of required) {
+    if (p[k] === undefined || p[k] === null) {
+      throw new TechStackProfileUnavailableError(`profile missing field: ${k}`);
+    }
+  }
+  if (!Array.isArray(p.ecosystem)) {
+    throw new TechStackProfileUnavailableError('profile ecosystem not an array');
+  }
+  if (!Array.isArray(p.exampleUseCases)) {
+    throw new TechStackProfileUnavailableError('profile exampleUseCases not an array');
+  }
+  return p as unknown as TechStackProfile;
 }
 
 // ---------------------------------------------------------------------------
-// Memoized client + cache controls — matches the audience-profiles pattern.
+// Memoized client + cache controls
 // ---------------------------------------------------------------------------
 
-let cached: TechStackProfileClientImpl | null = null;
+let cachedImpl: TechStackProfileClientImpl | null = null;
 
 export function getTechStackProfileClient(): TechStackProfileClientImpl {
-  if (!cached) cached = new TechStackProfileClientImpl();
-  return cached;
+  if (!cachedImpl) cachedImpl = new TechStackProfileClientImpl();
+  return cachedImpl;
 }
 
-/** Test-only: clear the memoized client so a new env/cache can take effect. */
 export function _resetTechStackProfileClientForTests(): void {
-  cached = null;
+  cachedImpl = null;
 }
 
-/** Clear the in-memory cache. Exposed for tests + a future admin flush route. */
 export function clearTechStackProfileCache(): void {
-  if (cached) {
-    (cached as unknown as { cache: Map<string, TechStackProfile> }).cache.clear();
-  }
+  if (cachedImpl) cachedImpl.invalidateAllSeen();
 }

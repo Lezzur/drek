@@ -23,8 +23,8 @@ import type {
 
 const APP_ID = 'drek';
 const IDEMPOTENCY_HEADER = 'Idempotency-Key';
-const MODEL_CONFIG_PATH = '/v1/model-config';
 const PENDING_VIDEO_PATH = '/v1/signals/pending-video';
+const MODEL_CONFIG_PATH = '/v1/model-config';
 
 /**
  * NeurocoreClient — DREK's domain-specific Neurocore facade.
@@ -40,13 +40,15 @@ const PENDING_VIDEO_PATH = '/v1/signals/pending-video';
  * this facade translates to DREK's `NeurocoreError` so existing
  * `catch (err) { if (err.code === '...') }` patterns keep matching.
  *
- * Two methods still hit Neurocore via raw fetch:
- *   - getModelConfig — `/v1/model-config` isn't on the shared client v1.0
- *     surface yet. Tracked as a follow-up to add to @lezzur/neurocore-client.
+ * Every method now delegates to the shared client. (Previously `getModelConfig`
+ * fell back to raw fetch because `/v1/model-config` wasn't on the v1.0 surface
+ * yet — fixed by Lezzur/neurocore#10 which added `nc.getModelConfig()`.)
  *
  * Phase 2c migrates polling/service.ts to nc.createPollingLoop().
- * Phase 2d deletes this facade entirely and updates call sites to import
- * the shared client directly.
+ * Phase 2d would delete this facade entirely and update call sites to import
+ * the shared client directly — punted as low-value given the facade does
+ * legitimate domain translation (error code mapping, payload validation,
+ * idempotency-key formats).
  */
 export class NeurocoreClient {
   private readonly baseUrl: string;
@@ -316,60 +318,16 @@ export class NeurocoreClient {
     return { entry: { id: payload.id } };
   }
 
-  // ─── getModelConfig — raw HTTP fallback ───────────────────────────
-  //
-  // `/v1/model-config` isn't on the shared client v1.0 surface yet. We
-  // keep DREK's existing raw-fetch path for this one method as a
-  // temporary measure. Tracked as a follow-up to add a `getModelConfig`
-  // method to @lezzur/neurocore-client and remove this fallback.
-
   async getModelConfig(): Promise<NeurocoreModelConfigResponse> {
-    if (!this.token) {
-      throw new NeurocoreError(
-        'NOT_CONFIGURED',
-        MODEL_CONFIG_PATH,
-        'NEUROCORE_TOKEN is not set — cannot call Neurocore',
-      );
-    }
-    const url = `${this.baseUrl}${MODEL_CONFIG_PATH}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    if (typeof timer.unref === 'function') timer.unref();
+    const nc = await getSharedClient();
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          Accept: 'application/json',
-        },
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new NeurocoreError(
-          statusToCode(response.status),
-          MODEL_CONFIG_PATH,
-          `${response.status} ${response.statusText}`,
-          response.status,
-        );
-      }
-      return (await response.json()) as NeurocoreModelConfigResponse;
+      // Shared client returns ModelConfigResponse which is structurally
+      // identical to NeurocoreModelConfigResponse (same wire shape from
+      // the same endpoint). Cast through unknown to satisfy the strict
+      // type pin DREK has on its own type.
+      return (await nc.getModelConfig()) as unknown as NeurocoreModelConfigResponse;
     } catch (err) {
-      if (err instanceof NeurocoreError) throw err;
-      const cause = err as Error & { name?: string };
-      if (cause.name === 'AbortError') {
-        throw new NeurocoreError(
-          'TIMEOUT',
-          MODEL_CONFIG_PATH,
-          `request exceeded ${this.timeoutMs}ms`,
-        );
-      }
-      throw new NeurocoreError(
-        'UNREACHABLE',
-        MODEL_CONFIG_PATH,
-        cause.message || 'fetch failed',
-      );
-    } finally {
-      clearTimeout(timer);
+      throw translate(err, MODEL_CONFIG_PATH);
     }
   }
 }
@@ -413,16 +371,6 @@ function sharedToDrekCode(sharedCode: string | undefined, status: number | null)
       if (status === 429) return 'RATE_LIMITED';
       return 'UNREACHABLE';
   }
-}
-
-function statusToCode(status: number): NeurocoreErrorCode {
-  if (status === 401) return 'UNAUTHENTICATED';
-  if (status === 403) return 'FORBIDDEN';
-  if (status === 404) return 'NOT_FOUND';
-  if (status === 429) return 'RATE_LIMITED';
-  if (status === 503) return 'DEGRADED';
-  if (status >= 400 && status < 500) return 'BAD_REQUEST';
-  return 'SERVER_ERROR';
 }
 
 // Need the type import alongside the runtime classes — re-import here so

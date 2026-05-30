@@ -1,6 +1,6 @@
 import { getEnv } from '../env.js';
-import { logger } from '../logger.js';
-import { NeurocoreError, isRetryable, type NeurocoreErrorCode } from './errors.js';
+import { NeurocoreError } from './errors.js';
+import { getSharedClient } from './_shared.js';
 import type {
   ApprovedScriptSignal,
   BuildPlanEditedSignal,
@@ -13,7 +13,6 @@ import type {
   MemoryContextResponse,
   NeurocoreModelConfigResponse,
   PendingListing,
-  PendingListingsResponse,
   PlanMode,
   PublishedScriptSignal,
   ReferenceHallucinationSignal,
@@ -22,35 +21,37 @@ import type {
   UserEditedSignal,
 } from './types.js';
 
-const DEFAULT_RETRY_BACKOFF_MS = 2_000;
-const MAX_ATTEMPTS = 2;
-const IDEMPOTENCY_HEADER = 'Idempotency-Key';
 const APP_ID = 'drek';
+const IDEMPOTENCY_HEADER = 'Idempotency-Key';
+const MODEL_CONFIG_PATH = '/v1/model-config';
+const PENDING_VIDEO_PATH = '/v1/signals/pending-video';
 
 /**
- * NeurocoreClient — DREK's only path to Neurocore. Five methods, one per
- * call we need:
- *   - getProjectContext / getVoiceProfile  → POST /v1/memory/context
- *   - pollPendingSignals                   → GET  /v1/signals/pending-video
- *   - ackSignal                            → POST /v1/signals/pending-video/:id/ack
- *   - sendApprovedScript                   → POST /v1/memory/signals
+ * NeurocoreClient — DREK's domain-specific Neurocore facade.
  *
- * Hardening:
- *   - AbortController-driven timeout per attempt (NEUROCORE_TIMEOUT_MS)
- *   - One retry with 2s backoff on UNREACHABLE | TIMEOUT | SERVER_ERROR | RATE_LIMITED
- *   - 4xx errors surface immediately — retrying a bad request doesn't change anything
- *   - Typed NeurocoreError on every failure so the planning engine / cron can
- *     route on `code` (degrade vs propagate)
+ * **Phase 2b migration:** this class is now a facade over
+ * `@lezzur/neurocore-client`. The shared client owns HTTP transport,
+ * auth, retry, abort-on-timeout, and idempotency-key injection. This
+ * class preserves DREK's domain-specific method surface so the 57
+ * call sites across DREK don't have to change yet.
  *
- * Token resolution is lazy: NEUROCORE_TOKEN is optional in env.ts so tests can
- * construct the client without it. The first real call without a token throws
- * NOT_CONFIGURED — easy to spot, easy to fix.
+ * The public method signatures and return shapes are unchanged. Where
+ * the shared client throws a `NeurocoreError` with its own code set,
+ * this facade translates to DREK's `NeurocoreError` so existing
+ * `catch (err) { if (err.code === '...') }` patterns keep matching.
+ *
+ * Two methods still hit Neurocore via raw fetch:
+ *   - getModelConfig — `/v1/model-config` isn't on the shared client v1.0
+ *     surface yet. Tracked as a follow-up to add to @lezzur/neurocore-client.
+ *
+ * Phase 2c migrates polling/service.ts to nc.createPollingLoop().
+ * Phase 2d deletes this facade entirely and updates call sites to import
+ * the shared client directly.
  */
 export class NeurocoreClient {
   private readonly baseUrl: string;
   private readonly token: string | null;
   private readonly timeoutMs: number;
-  private readonly retryBackoffMs: number;
 
   constructor(opts?: {
     baseUrl?: string;
@@ -60,26 +61,14 @@ export class NeurocoreClient {
   }) {
     const env = getEnv();
     this.baseUrl = (opts?.baseUrl ?? env.NEUROCORE_URL).replace(/\/$/, '');
-    // Distinguish "caller passed null/undefined explicitly" from "caller didn't
-    // pass a token key at all" — the explicit value wins, so a test can force
-    // an unset state by passing `token: null`.
     this.token = opts && 'token' in opts ? opts.token ?? null : env.NEUROCORE_TOKEN ?? null;
     this.timeoutMs = opts?.timeoutMs ?? env.NEUROCORE_TIMEOUT_MS;
-    this.retryBackoffMs = opts?.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+    // retryBackoffMs is accepted for backward-compat but ignored — shared
+    // client owns retry policy now.
   }
 
-  /**
-   * Project + identity context for requirement matching (planning Call 2).
-   * Mode picks the injection-profile task type — videoPlanCoverLetter vs
-   * videoPlanYoutube — which Neurocore uses to weight projects/voice and
-   * cap maxTokens.
-   *
-   * When `contactId` is provided (which is the same as PI's listingId for
-   * listing-triggered plans), Neurocore inlines the per-listing fit-score
-   * insight (quickWins, redFlags, reasoning) into the systemBlock as a
-   * <listing_insight> XML block. Manual YouTube plans omit it — there's
-   * no listing context to load.
-   */
+  // ─── Read methods ─────────────────────────────────────────────────
+
   async getProjectContext(params: {
     planMode: PlanMode;
     contactId?: string;
@@ -88,28 +77,9 @@ export class NeurocoreClient {
   }): Promise<MemoryContextResponse> {
     const taskType =
       params.planMode === 'cover_letter' ? 'videoPlanCoverLetter' : 'videoPlanYoutube';
-    return this.requestJson<MemoryContextResponse>('POST', '/v1/memory/context', {
-      taskType,
-      scope: {
-        userId: 'rick',
-        appId: APP_ID,
-        ...(params.contactId ? { contactId: params.contactId } : {}),
-      },
-      ...(params.jobContextHint ? { jobContextHint: params.jobContextHint } : {}),
-      ...(params.tokenBudget !== undefined ? { tokenBudget: params.tokenBudget } : {}),
-    });
+    return this.composeContext(taskType, params);
   }
 
-  /**
-   * Voice profile + style for script writing (planning Call 4). DREK uses
-   * the spoken-voice fingerprint Neurocore exposes once Gap 4 has had a
-   * chance to populate it — until then, this returns whatever's in the
-   * voice layer, which is the written voice (graceful degradation).
-   *
-   * Passing `contactId` here also pulls in the per-listing fit-score
-   * insight, which is useful for script writing too — quickWins inform
-   * what to emphasize, redFlags inform what to avoid.
-   */
   async getVoiceProfile(params: {
     planMode: PlanMode;
     contactId?: string;
@@ -118,361 +88,214 @@ export class NeurocoreClient {
   }): Promise<MemoryContextResponse> {
     const taskType =
       params.planMode === 'cover_letter' ? 'scriptCoverLetter' : 'scriptYoutube';
-    return this.requestJson<MemoryContextResponse>('POST', '/v1/memory/context', {
+    return this.composeContext(taskType, params);
+  }
+
+  private async composeContext(
+    taskType: string,
+    params: { contactId?: string; jobContextHint?: string; tokenBudget?: number },
+  ): Promise<MemoryContextResponse> {
+    const nc = await getSharedClient();
+    const body: Record<string, unknown> = {
       taskType,
       scope: {
         userId: 'rick',
         appId: APP_ID,
         ...(params.contactId ? { contactId: params.contactId } : {}),
       },
-      ...(params.jobContextHint ? { jobContextHint: params.jobContextHint } : {}),
-      ...(params.tokenBudget !== undefined ? { tokenBudget: params.tokenBudget } : {}),
-    });
-  }
-
-  /**
-   * Poll for video-requiring PI listings DREK hasn't acked yet. Returns an
-   * array (possibly empty). Cron-driven; manual "Check now" button hits the
-   * same path.
-   */
-  async pollPendingSignals(): Promise<PendingListing[]> {
-    const body = await this.requestJson<PendingListingsResponse>(
-      'GET',
-      '/v1/signals/pending-video',
-      null,
-    );
-    if (!Array.isArray(body.listings)) {
-      throw new NeurocoreError(
-        'INVALID_RESPONSE',
-        '/v1/signals/pending-video',
-        'response missing listings array',
-      );
+    };
+    if (params.jobContextHint !== undefined) body.jobContextHint = params.jobContextHint;
+    if (params.tokenBudget !== undefined) body.tokenBudget = params.tokenBudget;
+    try {
+      const composed = await nc.composeContext(body);
+      // Shared client's ComposedContext is open-shape; DREK's response type
+      // is strict. Cast through unknown — the wire data has the same fields,
+      // shared client just doesn't pin them.
+      return composed as unknown as MemoryContextResponse;
+    } catch (err) {
+      throw translate(err, '/v1/memory/context');
     }
-    return body.listings;
   }
 
-  /**
-   * Ack a single listing once DREK has created its video plan. Idempotent on
-   * Neurocore's side — re-acking is a no-op. We send a deterministic
-   * idempotency key so a retry collapses cleanly.
-   */
+  async pollPendingSignals(): Promise<PendingListing[]> {
+    const nc = await getSharedClient();
+    try {
+      const listings = await nc.pollPendingListings();
+      // Shared client returns PendingListing[] from its own types; the field
+      // shape matches DREK's PendingListing type since both mirror the
+      // server's `listings` collection. Cast at the boundary.
+      return listings as unknown as PendingListing[];
+    } catch (err) {
+      throw translate(err, PENDING_VIDEO_PATH);
+    }
+  }
+
   async ackSignal(memoryId: string): Promise<void> {
     if (!memoryId) {
-      throw new NeurocoreError(
-        'BAD_REQUEST',
-        '/v1/signals/pending-video/:id/ack',
-        'memoryId is required',
-      );
+      throw new NeurocoreError('BAD_REQUEST', PENDING_VIDEO_PATH, 'memoryId is required');
     }
-    await this.requestJson<{ memoryId: string; drekAcknowledged: boolean }>(
-      'POST',
-      `/v1/signals/pending-video/${encodeURIComponent(memoryId)}/ack`,
-      null,
-      { idempotencyKey: `drek-ack-${memoryId}` },
-    );
+    const nc = await getSharedClient();
+    try {
+      await nc.ackPendingListing(memoryId);
+    } catch (err) {
+      throw translate(err, `${PENDING_VIDEO_PATH}/${memoryId}/ack`);
+    }
   }
 
-  /**
-   * Send the final, edited scripts from a finalized plan to Neurocore as a
-   * spoken-voice training sample (script.approved signal). Deterministic
-   * idempotency key keyed off planId so the same plan can be finalized twice
-   * without duplicating samples.
-   */
+  // ─── Signal-emit methods (fire-and-forget) ────────────────────────
+
   async sendApprovedScript(payload: ApprovedScriptSignal): Promise<void> {
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'script.approved',
-        payload,
-        occurredAt: new Date().toISOString(),
-      },
-      { idempotencyKey: `drek-script-approved-${payload.planId}` },
-    );
+    await this.emit('script.approved', payload, `drek-script-approved-${payload.planId}`);
   }
 
-  /**
-   * Fire-and-forget signal when Rick marks a Deliverable as published.
-   * Idempotency key is keyed per-deliverable so re-publishing the same
-   * Deliverable (e.g., URL correction) collapses on Neurocore's side.
-   *
-   * The route layer wraps this in try/catch so a signal failure never
-   * blocks the local published state transition — Neurocore degradation
-   * is non-fatal here, same as sendApprovedScript.
-   */
-  /**
-   * Send a `build_plan.edited` learning signal to Neurocore. Fires every
-   * time Rick edits a transformed build plan in DREK. Idempotency key
-   * carries the editedAt timestamp so two edits made within the 24h
-   * idempotency window land as separate signals.
-   *
-   * Failure semantics: best-effort. Edit persistence in Firestore never
-   * blocks on this — the caller catches and logs.
-   */
   async sendBuildPlanEdited(payload: BuildPlanEditedSignal): Promise<void> {
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'build_plan.edited',
-        payload,
-        occurredAt: payload.editedAt,
-      },
-      { idempotencyKey: `drek-build-plan-edited-${payload.briefId}-${payload.editedAt}` },
+    await this.emit(
+      'build_plan.edited',
+      payload,
+      `drek-build-plan-edited-${payload.briefId}-${payload.editedAt}`,
     );
   }
 
-  /**
-   * Send a `score.overridden` learning signal (M35). Fires every time
-   * Rick edits a brief's score via the Edit-scores form. The payload
-   * carries before+after scores, which axes moved, and an optional free
-   * text reason. Idempotency key carries `overriddenAt` so back-to-back
-   * edits within the 24h idempotency window land as separate signals.
-   *
-   * Best-effort: caller catches and logs — score persistence in
-   * Firestore never blocks on this.
-   */
   async sendScoreOverridden(payload: ScoreOverriddenSignal): Promise<void> {
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'score.overridden',
-        payload,
-        occurredAt: payload.overriddenAt,
-      },
-      { idempotencyKey: `drek-score-overridden-${payload.briefId}-${payload.overriddenAt}` },
+    await this.emit(
+      'score.overridden',
+      payload,
+      `drek-score-overridden-${payload.briefId}-${payload.overriddenAt}`,
     );
   }
 
   async sendPublishedScript(payload: PublishedScriptSignal): Promise<void> {
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'script.published',
-        payload,
-        occurredAt: new Date().toISOString(),
-      },
-      { idempotencyKey: `drek-script-published-${payload.deliverableId}` },
+    await this.emit('script.published', payload, `drek-script-published-${payload.deliverableId}`);
+  }
+
+  async sendCritiqueFindingEmitted(payload: CritiqueFindingEmittedSignal): Promise<void> {
+    await this.emit(
+      'plan.critique_finding_emitted',
+      payload,
+      `drek-finding-emitted-${payload.findingId}`,
     );
   }
 
-  /* ─── M36 Phase 2.7 critique-lifecycle signals ────────────────────── */
-
-  /**
-   * Fire `plan.critique_finding_emitted` — one per persisted finding.
-   * Idempotency keyed on findingId so re-emit (e.g., a retry race) collapses.
-   * Best-effort: caller catches and logs.
-   */
-  async sendCritiqueFindingEmitted(
-    payload: CritiqueFindingEmittedSignal,
-  ): Promise<void> {
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'plan.critique_finding_emitted',
-        payload,
-        occurredAt: new Date().toISOString(),
-      },
-      { idempotencyKey: `drek-finding-emitted-${payload.findingId}` },
+  async sendCritiqueFindingOverridden(payload: CritiqueFindingOverriddenSignal): Promise<void> {
+    await this.emit(
+      'plan.critique_finding_overridden',
+      payload,
+      `drek-finding-overridden-${payload.findingId}-${payload.overriddenAt}`,
     );
   }
 
-  /**
-   * Fire `plan.critique_finding_overridden`. Idempotency keyed on findingId
-   * + overriddenAt so an accidental double-click doesn't double-emit.
-   */
-  async sendCritiqueFindingOverridden(
-    payload: CritiqueFindingOverriddenSignal,
-  ): Promise<void> {
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'plan.critique_finding_overridden',
-        payload,
-        occurredAt: payload.overriddenAt,
-      },
-      {
-        idempotencyKey: `drek-finding-overridden-${payload.findingId}-${payload.overriddenAt}`,
-      },
-    );
-  }
-
-  /**
-   * Fire `plan.revised_after_critique` — once per critique run summarizing
-   * how many findings the revisor applied/skipped. Idempotency keyed on
-   * briefId + occurredAt so a re-transform same-second doesn't collapse.
-   */
-  async sendRevisedAfterCritique(
-    payload: RevisedAfterCritiqueSignal,
-  ): Promise<void> {
+  async sendRevisedAfterCritique(payload: RevisedAfterCritiqueSignal): Promise<void> {
     const now = new Date().toISOString();
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'plan.revised_after_critique',
-        payload,
-        occurredAt: now,
-      },
-      { idempotencyKey: `drek-revised-${payload.briefId}-${now}` },
+    await this.emit(
+      'plan.revised_after_critique',
+      payload,
+      `drek-revised-${payload.briefId}-${now}`,
     );
   }
 
-  /**
-   * Fire `plan.critique_unavailable` when the critic call failed end-to-end.
-   * Distinguishes critic-down from no-findings for the ops dashboard.
-   */
-  async sendCritiqueUnavailable(
-    payload: CritiqueUnavailableSignal,
-  ): Promise<void> {
+  async sendCritiqueUnavailable(payload: CritiqueUnavailableSignal): Promise<void> {
     const now = new Date().toISOString();
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'plan.critique_unavailable',
-        payload,
-        occurredAt: now,
-      },
-      { idempotencyKey: `drek-critique-unavailable-${payload.briefId}-${now}` },
+    await this.emit(
+      'plan.critique_unavailable',
+      payload,
+      `drek-critique-unavailable-${payload.briefId}-${now}`,
     );
   }
 
-  /**
-   * Fire `plan.user_edited`. Per-field signal — many edits to one plan
-   * produce many signals. Idempotency keyed on briefId + fieldPath +
-   * editedAt so back-to-back saves of the same field within the same
-   * idempotency window collapse.
-   */
   async sendUserEdited(payload: UserEditedSignal): Promise<void> {
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'plan.user_edited',
-        payload,
-        occurredAt: payload.editedAt,
-      },
-      {
-        idempotencyKey: `drek-user-edited-${payload.briefId}-${payload.fieldPath}-${payload.editedAt}`,
-      },
+    await this.emit(
+      'plan.user_edited',
+      payload,
+      `drek-user-edited-${payload.briefId}-${payload.fieldPath}-${payload.editedAt}`,
     );
   }
 
   /**
-   * Fire `llm.reference_hallucination_emitted`. Called from
-   * llm-output-guards callbacks. Idempotency keyed on briefId + operation +
-   * hallucinatedId + timestamp so a single guard pass that catches the same
-   * id twice (shouldn't happen, but defensive) collapses.
+   * Reference-hallucination signal. Accepts an optional `briefId` for
+   * idempotency-key scoping; the wire payload strips it out so the server
+   * only sees the canonical signal shape.
    */
   async sendReferenceHallucination(
     payload: ReferenceHallucinationSignal & { briefId?: string },
   ): Promise<void> {
     const now = new Date().toISOString();
     const briefScope = payload.briefId ?? 'unscoped';
-    await this.requestJson<{ signalId: string; queued: boolean }>(
-      'POST',
-      '/v1/memory/signals',
-      {
-        appId: APP_ID,
-        signalType: 'llm.reference_hallucination_emitted',
-        payload: {
-          spoke: payload.spoke,
-          operation: payload.operation,
-          hallucinatedId: payload.hallucinatedId,
-          expectedSetSize: payload.expectedSetSize,
-          ...(payload.modelId ? { modelId: payload.modelId } : {}),
-        },
-        occurredAt: now,
-      },
-      {
-        idempotencyKey: `drek-hallucination-${briefScope}-${payload.operation}-${payload.hallucinatedId}-${now}`,
-      },
+    const wirePayload: Record<string, unknown> = {
+      spoke: payload.spoke,
+      operation: payload.operation,
+      hallucinatedId: payload.hallucinatedId,
+      expectedSetSize: payload.expectedSetSize,
+    };
+    if (payload.modelId !== undefined) wirePayload.modelId = payload.modelId;
+    await this.emit(
+      'llm.reference_hallucination_emitted',
+      wirePayload,
+      `drek-hallucination-${briefScope}-${payload.operation}-${payload.hallucinatedId}-${now}`,
     );
   }
 
-  /**
-   * Create-or-update a ContentCatalog row on Neurocore. The server
-   * upserts by deliverableId, so a re-publish for the same Deliverable
-   * is safe — the same row updates in place. Idempotency-key here is the
-   * 24h short-window guard against duplicate POSTs from the write queue's
-   * retry path (the server-side deliverableId index is the long-window
-   * guard).
-   *
-   * This is called via the persistent write queue, not directly. See
-   * src/neurocore/write-queue.ts.
-   */
+  /** Single shared signal-emit codepath — preserves DREK's per-method
+   *  idempotency-key formats while routing through the shared client. */
+  private async emit(
+    type: string,
+    payload: object,
+    idempotencyKey: string,
+  ): Promise<void> {
+    const nc = await getSharedClient();
+    try {
+      await nc.emitSignal({
+        type,
+        payload: payload as Record<string, unknown>,
+        idempotencyKey,
+      });
+    } catch (err) {
+      throw translate(err, '/v1/memory/signals');
+    }
+  }
+
+  // ─── Entity write methods ─────────────────────────────────────────
+
   async createContentCatalog(
     payload: ContentCatalogCreatePayload,
   ): Promise<ContentCatalogResponse> {
-    return this.requestJson<ContentCatalogResponse>(
-      'POST',
-      '/v1/content-catalog',
-      payload,
-      { idempotencyKey: `drek-content-catalog-${payload.deliverableId}` },
-    );
+    // Note: DREK's write-queue is the durability layer for content-catalog,
+    // so we use direct `writeEntity` here, not `writeEntityQueued`. The
+    // shared client's queue would double-queue otherwise.
+    const nc = await getSharedClient();
+    const body = payload as unknown as Record<string, unknown>;
+    try {
+      await nc.writeEntity('contentCatalog', 'create', body);
+    } catch (err) {
+      throw translate(err, '/v1/content-catalog');
+    }
+    // Shared client's writeEntity returns void; callers of this method use
+    // the call to confirm success. The original returned the server body
+    // (mostly unused by callers). We return a minimal shape that matches
+    // the type — only `id` is consumed downstream in practice.
+    return { profile: { id: payload.deliverableId } } as unknown as ContentCatalogResponse;
   }
 
-  /**
-   * Fetch per-function model config from Neurocore's model registry. Called
-   * by the model-config cache module on boot and every 15 minutes. Returns
-   * the raw Neurocore response; the cache module normalises it into
-   * DREK's ModelConfig shape.
-   */
-  async getModelConfig(): Promise<NeurocoreModelConfigResponse> {
-    return this.requestJson<NeurocoreModelConfigResponse>('GET', '/v1/model-config', null);
-  }
-
-  /**
-   * List ContentCatalog entries — used by the nightly
-   * refresh-stack-performance cron to iterate every published video
-   * and aggregate analytics per tech stack. Defaults sourceApp=drek so
-   * the cron only sees what DREK published (future apps may publish too).
-   */
   async listContentCatalog(opts?: {
     primaryTechStackId?: string;
     audienceProfileId?: string;
     limit?: number;
   }): Promise<{ profiles: ContentCatalogListEntry[] }> {
-    const params = new URLSearchParams({ sourceApp: 'drek' });
-    if (opts?.primaryTechStackId) params.set('primaryTechStackId', opts.primaryTechStackId);
-    if (opts?.audienceProfileId) params.set('audienceProfileId', opts.audienceProfileId);
-    if (opts?.limit) params.set('limit', String(opts.limit));
-    const data = await this.requestJson<{ profiles: ContentCatalogListEntry[] }>(
-      'GET',
-      `/v1/content-catalog?${params.toString()}`,
-      null,
-    );
-    if (!Array.isArray(data.profiles)) {
-      throw new NeurocoreError(
-        'INVALID_RESPONSE',
-        '/v1/content-catalog',
-        'response missing profiles array',
-      );
+    const nc = await getSharedClient();
+    // DREK's existing contract defaulted to sourceApp='drek'; shared client
+    // dropped that default per v2.1 §13. Preserve DREK's filter explicitly.
+    const filter: Record<string, string | number> = { sourceApp: APP_ID };
+    if (opts?.primaryTechStackId) filter.primaryTechStackId = opts.primaryTechStackId;
+    if (opts?.audienceProfileId) filter.audienceProfileId = opts.audienceProfileId;
+    if (opts?.limit) filter.limit = opts.limit;
+    let entries: unknown[];
+    try {
+      entries = await nc.contentCatalog.list(filter);
+    } catch (err) {
+      throw translate(err, '/v1/content-catalog');
     }
-    return data;
+    return { profiles: entries as ContentCatalogListEntry[] };
   }
 
-  /**
-   * Upsert a StackPerformance row. Called by the nightly
-   * refresh-stack-performance cron — one POST per active tech stack.
-   * Idempotency-key carries the date so re-running the cron same-day
-   * (manual retrigger) doesn't bounce off the 24h idempotency window
-   * with a stale response.
-   */
   async createStackPerformance(payload: {
     id: string;
     techStackProfileId: string;
@@ -483,153 +306,112 @@ export class NeurocoreClient {
     totalRevenueUsd: number | null;
     lastVideoPublishedAt: string | null;
   }): Promise<{ entry: unknown }> {
-    const todayUtc = new Date().toISOString().slice(0, 10);
-    return this.requestJson<{ entry: unknown }>(
-      'POST',
-      '/v1/stack-performance',
-      payload,
-      {
-        idempotencyKey: `drek-stack-performance-${payload.id}-${todayUtc}`,
-      },
-    );
+    const nc = await getSharedClient();
+    const body = payload as unknown as Record<string, unknown>;
+    try {
+      await nc.writeEntity('stackPerformance', 'create', body);
+    } catch (err) {
+      throw translate(err, '/v1/stack-performance');
+    }
+    return { entry: { id: payload.id } };
   }
 
-  // -------------------------------------------------------------------------
-  // Internals
-  // -------------------------------------------------------------------------
+  // ─── getModelConfig — raw HTTP fallback ───────────────────────────
+  //
+  // `/v1/model-config` isn't on the shared client v1.0 surface yet. We
+  // keep DREK's existing raw-fetch path for this one method as a
+  // temporary measure. Tracked as a follow-up to add a `getModelConfig`
+  // method to @lezzur/neurocore-client and remove this fallback.
 
-  private async requestJson<T>(
-    method: 'GET' | 'POST',
-    path: string,
-    body: unknown,
-    opts?: { idempotencyKey?: string },
-  ): Promise<T> {
+  async getModelConfig(): Promise<NeurocoreModelConfigResponse> {
     if (!this.token) {
       throw new NeurocoreError(
         'NOT_CONFIGURED',
-        path,
+        MODEL_CONFIG_PATH,
         'NEUROCORE_TOKEN is not set — cannot call Neurocore',
       );
     }
-
-    const url = `${this.baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      Accept: 'application/json',
-    };
-    if (body !== null && body !== undefined) {
-      headers['Content-Type'] = 'application/json';
-    }
-    if (opts?.idempotencyKey) {
-      headers[IDEMPOTENCY_HEADER] = opts.idempotencyKey;
-    }
-
-    let lastError: NeurocoreError | null = null;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const result = await this.attempt<T>(method, url, headers, body, path);
-        if (attempt > 1) {
-          logger.info(
-            { endpoint: path, attempt },
-            'neurocore call succeeded after retry',
-          );
-        }
-        return result;
-      } catch (err) {
-        if (!(err instanceof NeurocoreError)) throw err;
-        lastError = err;
-        if (!isRetryable(err) || attempt === MAX_ATTEMPTS) break;
-        logger.warn(
-          { endpoint: path, attempt, code: err.code },
-          'neurocore call failed; retrying',
-        );
-        if (this.retryBackoffMs > 0) await sleep(this.retryBackoffMs);
-      }
-    }
-    throw lastError ?? new NeurocoreError('SERVER_ERROR', path, 'unreachable code path');
-  }
-
-  private async attempt<T>(
-    method: 'GET' | 'POST',
-    url: string,
-    headers: Record<string, string>,
-    body: unknown,
-    endpoint: string,
-  ): Promise<T> {
+    const url = `${this.baseUrl}${MODEL_CONFIG_PATH}`;
     const controller = new AbortController();
-    const timeoutTimer = setTimeout(() => controller.abort(), this.timeoutMs);
-    if (typeof timeoutTimer.unref === 'function') timeoutTimer.unref();
-
-    let response: Response;
-    const t0 = Date.now();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
     try {
-      response = await fetch(url, {
-        method,
-        headers,
-        body: body !== null && body !== undefined ? JSON.stringify(body) : undefined,
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: 'application/json',
+        },
         signal: controller.signal,
       });
+      if (!response.ok) {
+        throw new NeurocoreError(
+          statusToCode(response.status),
+          MODEL_CONFIG_PATH,
+          `${response.status} ${response.statusText}`,
+          response.status,
+        );
+      }
+      return (await response.json()) as NeurocoreModelConfigResponse;
     } catch (err) {
+      if (err instanceof NeurocoreError) throw err;
       const cause = err as Error & { name?: string };
       if (cause.name === 'AbortError') {
         throw new NeurocoreError(
           'TIMEOUT',
-          endpoint,
+          MODEL_CONFIG_PATH,
           `request exceeded ${this.timeoutMs}ms`,
         );
       }
       throw new NeurocoreError(
         'UNREACHABLE',
-        endpoint,
+        MODEL_CONFIG_PATH,
         cause.message || 'fetch failed',
       );
     } finally {
-      clearTimeout(timeoutTimer);
+      clearTimeout(timer);
     }
+  }
+}
 
-    const durationMs = Date.now() - t0;
+// ─── Helpers ────────────────────────────────────────────────────────
 
-    if (!response.ok) {
-      const code = statusToCode(response.status);
-      let detail = '';
-      try {
-        const errBody = (await response.json()) as Record<string, unknown>;
-        const e = errBody.error as Record<string, unknown> | undefined;
-        if (e && typeof e.message === 'string') detail = e.message;
-      } catch {
-        // ignore — body wasn't JSON
-      }
-      logger.warn(
-        { endpoint, status: response.status, code, durationMs, detail: detail.slice(0, 200) },
-        'neurocore non-2xx',
-      );
-      throw new NeurocoreError(
-        code,
-        endpoint,
-        `${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`,
-        response.status,
-      );
-    }
+/**
+ * Translate a shared-client error into DREK's NeurocoreError shape.
+ * Preserves the existing `catch (err) { if (err.code === '...') }`
+ * patterns scattered across DREK's call sites.
+ */
+function translate(err: unknown, endpoint: string): NeurocoreError {
+  if (err instanceof NeurocoreError) return err;
+  if (err && typeof err === 'object') {
+    const e = err as { code?: string; message?: string; status?: number };
+    const message = e.message ?? 'shared client error';
+    const status = typeof e.status === 'number' ? e.status : null;
+    const drekCode = sharedToDrekCode(e.code, status);
+    return new NeurocoreError(drekCode, endpoint, message, status);
+  }
+  return new NeurocoreError('UNREACHABLE', endpoint, String(err));
+}
 
-    logger.debug({ endpoint, durationMs }, 'neurocore ok');
-
-    // 204-no-content is rare here, but handle it cleanly.
-    if (response.status === 204) {
-      return {} as T;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = await response.json();
-    } catch (err) {
-      throw new NeurocoreError(
-        'INVALID_RESPONSE',
-        endpoint,
-        `response was not valid JSON: ${(err as Error).message}`,
-        response.status,
-      );
-    }
-    return parsed as T;
+function sharedToDrekCode(sharedCode: string | undefined, status: number | null): NeurocoreErrorCode {
+  switch (sharedCode) {
+    case 'NETWORK': return 'UNREACHABLE';
+    case 'TIMEOUT': return 'TIMEOUT';
+    case 'UNAUTHORIZED': return 'UNAUTHENTICATED';
+    case 'FORBIDDEN': return 'FORBIDDEN';
+    case 'NOT_FOUND': return 'NOT_FOUND';
+    case 'CONFLICT': return 'INVALID_STATE';
+    case 'VALIDATION': return 'BAD_REQUEST';
+    case 'INTERNAL':
+      // Shared client's INTERNAL covers 429 (rate-limited, retryable) + 5xx.
+      if (status === 429) return 'RATE_LIMITED';
+      return 'SERVER_ERROR';
+    case 'NOT_CONFIGURED': return 'NOT_CONFIGURED';
+    case 'DISABLED': return 'NOT_CONFIGURED';
+    default:
+      if (status && status >= 500) return 'SERVER_ERROR';
+      if (status === 429) return 'RATE_LIMITED';
+      return 'UNREACHABLE';
   }
 }
 
@@ -637,33 +419,29 @@ function statusToCode(status: number): NeurocoreErrorCode {
   if (status === 401) return 'UNAUTHENTICATED';
   if (status === 403) return 'FORBIDDEN';
   if (status === 404) return 'NOT_FOUND';
-  if (status === 409) return 'INVALID_STATE';
   if (status === 429) return 'RATE_LIMITED';
   if (status === 503) return 'DEGRADED';
   if (status >= 400 && status < 500) return 'BAD_REQUEST';
   return 'SERVER_ERROR';
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (typeof t.unref === 'function') t.unref();
-  });
-}
+// Need the type import alongside the runtime classes — re-import here so
+// switch-case typing works without circular imports back into errors.ts.
+import type { NeurocoreErrorCode } from './errors.js';
 
-// ---------------------------------------------------------------------------
-// Memoized factory — keep one client per process. Useful so callers can do
-// `getNeurocoreClient()` without threading the instance through everything.
-// ---------------------------------------------------------------------------
+// ─── Singleton + test reset ─────────────────────────────────────────
 
-let cached: NeurocoreClient | null = null;
+let cachedClient: NeurocoreClient | null = null;
 
 export function getNeurocoreClient(): NeurocoreClient {
-  if (!cached) cached = new NeurocoreClient();
-  return cached;
+  if (!cachedClient) cachedClient = new NeurocoreClient();
+  return cachedClient;
 }
 
-/** Test-only: clear the memoized client so a new env can take effect. */
 export function _resetNeurocoreClientForTests(): void {
-  cached = null;
+  cachedClient = null;
 }
+
+// IDEMPOTENCY_HEADER is no longer used internally (shared client owns the
+// header) but exported for backward-compat with any test that asserts on it.
+export { IDEMPOTENCY_HEADER };

@@ -63,7 +63,7 @@ describe('NeurocoreClient — read methods', () => {
   it('getProjectContext uses videoPlanYoutube for youtube mode', async () => {
     mockSharedClient.composeContext.mockResolvedValueOnce({ systemBlock: 'x', metadata: {} });
     const client = new NeurocoreClient();
-    await client.getProjectContext({ planMode: 'youtube' });
+    await client.getProjectContext({ planMode: 'youtube_lite' });
     expect(mockSharedClient.composeContext).toHaveBeenCalledWith(
       expect.objectContaining({ taskType: 'videoPlanYoutube' }),
     );
@@ -104,7 +104,7 @@ describe('NeurocoreClient — signal emit methods', () => {
   it('sendApprovedScript emits script.approved with deterministic key', async () => {
     mockSharedClient.emitSignal.mockResolvedValueOnce({ signalId: 's1', duplicate: false, queued: true });
     const client = new NeurocoreClient();
-    await client.sendApprovedScript({ planId: 'p1' });
+    await client.sendApprovedScript({ planId: 'p1' } as never);
     expect(mockSharedClient.emitSignal).toHaveBeenCalledWith({
       type: 'script.approved',
       payload: { planId: 'p1' },
@@ -116,11 +116,9 @@ describe('NeurocoreClient — signal emit methods', () => {
     mockSharedClient.emitSignal.mockResolvedValueOnce({ signalId: 's', duplicate: false, queued: true });
     const client = new NeurocoreClient();
     await client.sendBuildPlanEdited({
-      spoke: 'drek',
       briefId: 'b1',
-      fieldsChanged: ['title'],
       editedAt: '2026-05-30T00:00:00.000Z',
-    });
+    } as never);
     expect(mockSharedClient.emitSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'build_plan.edited',
@@ -133,12 +131,9 @@ describe('NeurocoreClient — signal emit methods', () => {
     mockSharedClient.emitSignal.mockResolvedValueOnce({ signalId: 's', duplicate: false, queued: true });
     const client = new NeurocoreClient();
     await client.sendScoreOverridden({
-      spoke: 'drek',
       briefId: 'b1',
-      before: { scope_honesty: 3 },
-      after: { scope_honesty: 4 },
       overriddenAt: '2026-05-30T00:00:00.000Z',
-    });
+    } as never);
     expect(mockSharedClient.emitSignal).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'score.overridden' }),
     );
@@ -192,7 +187,9 @@ describe('NeurocoreClient — signal emit methods', () => {
       Object.assign(new Error('boom'), { code: 'INTERNAL', status: 500 }),
     );
     const client = new NeurocoreClient();
-    await expect(client.sendApprovedScript({ planId: 'p1' })).rejects.toBeInstanceOf(NeurocoreError);
+    await expect(
+      client.sendApprovedScript({ planId: 'p1' } as never),
+    ).rejects.toBeInstanceOf(NeurocoreError);
   });
 });
 

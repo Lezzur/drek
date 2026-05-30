@@ -1,41 +1,45 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { logger } from '../logger.js';
 import {
-  getNeurocoreClient,
   NeurocoreError,
-  type NeurocoreClient,
   type PendingListing,
 } from '../neurocore/index.js';
+import { getSharedClient } from '../neurocore/_shared.js';
 import { createPlan, findPlanByListing } from '../db/plans.js';
 import { upsertListing } from '../db/listings.js';
 import { readPollingConfig, recordPoll } from '../db/config.js';
 import { getEnv } from '../env.js';
+import type { CycleStats, PollingLoop, ProcessResult } from '@lezzur/neurocore-client';
+import type { NeurocoreClient } from '../neurocore/client.js';
+
+/**
+ * Lazily import `createPollingLoop` from the shared package so we can build a
+ * loop without instantiating a full shared client (which requires a token).
+ * Used by the legacy `client` opt path in tests.
+ */
+async function getCreatePollingLoopNoSharedClient() {
+  const mod = await import('@lezzur/neurocore-client');
+  return mod.createPollingLoop;
+}
 
 /**
  * Polling service — DREK's background ingestion of PI listings from
- * Neurocore. Discovery brief D-20: v1 is poll-based; v2 might add a
- * webhook from Neurocore but the same-VPS latency makes 30-min polling
- * fine for the cover-letter batch workflow (PRD §5.3).
+ * Neurocore.
  *
- * Behavior per cycle:
- *   1. Read polling config (config/polling doc). If pollingEnabled is
- *      false, no-op and just bump lastPollAt.
- *   2. Call Neurocore.pollPendingSignals — returns video-requiring
- *      listings DREK hasn't acked yet.
- *   3. For each listing:
- *        - Look up by sourceListingId — if a plan already exists, skip.
- *        - Otherwise create a new plan in 'awaiting_review' status with
- *          sourceListingId + sourceListingText prefilled.
- *        - Also upsert into available_listings so the M12 listings page
- *          has the full PI context (company, role, raw text) for the
- *          "available listings" view.
- *        - Ack the signal via Neurocore.ackSignal so it drops out of
- *          future polls.
- *   4. Persist lastPollAt = now.
+ * **Phase 2c migration:** the cycle scaffold (mutex, pollFn → ackFn flow,
+ * partial-failure isolation, ack-only-on-success, disabled-state no-op)
+ * is now delegated to `@lezzur/neurocore-client`'s `createPollingLoop`.
+ * DREK-specific behavior — Firestore-backed `pollingEnabled` flag,
+ * `processListing` (find existing plan, create new plan, upsert into
+ * available_listings), and `recordPoll(lastPollAt)` — moves into the
+ * loop's callbacks (`getEnabledFlag`, `processItem`, `onCycleComplete`).
  *
- * Failures are isolated per-listing — one listing throwing doesn't abort
- * the whole cycle. The cycle returns counters so the caller (the "Check
- * now" button in M7) can show "3 new listings ingested" to Rick.
+ * The public API is preserved:
+ *   - `runPollCycle(opts)` returns `PollCycleResult` for the M7 "Check now"
+ *     button. Now backed by `loop.runOnce()` and translated.
+ *   - `makePollingJob()` returns a scheduler Job for src/index.ts. Now
+ *     wraps `runPollCycle` (which wraps `loop.runOnce`).
+ *   - `_resetCycleMutexForTests()` disposes the memoized loop singleton.
  */
 
 export interface PollCycleResult {
@@ -54,85 +58,81 @@ export interface PollCycleResult {
   durationMs: number;
 }
 
-// Mutex so a manual "Check now" click during a scheduled tick doesn't
-// double-process the same listings.
-let cycleInFlight = false;
-
 interface PollOptions {
-  client?: NeurocoreClient;
+  /** Optional Firestore override for tests. */
   db?: Firestore;
+  /**
+   * @deprecated Phase 2c migration kept this opt as a backward-compat
+   * escape hatch for the integration tests in tests/integration/. The
+   * production path uses the shared client via getSharedClient(); only
+   * pass `client` when running tests that need to inject a stub
+   * NeurocoreClient end-to-end. Phase 2d removes this option entirely
+   * once the integration test is refactored to vi.mock the shared client.
+   */
+  client?: NeurocoreClient;
 }
 
-/** Run one full poll cycle. Idempotent on the listing axis (existing plans
- *  are skipped) and on the ack axis (Neurocore's ack is idempotent — DREK
- *  sends a deterministic key). */
-export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleResult> {
-  if (cycleInFlight) {
-    logger.info('poll-cycle skipped — another cycle is already running');
-    return {
-      fetched: 0,
-      createdPlans: 0,
-      skipped: 0,
-      failed: 0,
-      acked: 0,
-      disabled: false,
-      durationMs: 0,
-    };
-  }
-  cycleInFlight = true;
-  const t0 = Date.now();
+/** Test-injectable cycle counters. processListing populates these so the
+ *  translation from CycleStats → PollCycleResult can split itemsErrored
+ *  into created/skipped/failed properly. */
+interface CycleAccumulator {
+  createdPlans: number;
+  skipped: number;
+}
+
+// Cross-call mutex so a manual "Check now" click during a scheduled tick
+// doesn't double-process the same listings. The shared loop also has a
+// per-instance mutex, but we build a fresh loop per call (for testability),
+// so the cross-call guard lives at the runPollCycle boundary.
+let cycleInFlight = false;
+
+async function buildLoopReal(
+  acc: CycleAccumulator,
+  db: Firestore | undefined,
+  legacyClient?: NeurocoreClient,
+): Promise<PollingLoop> {
+  // Defer env read so a missing env in tests doesn't blow up the legacy
+  // path. intervalMs only matters for loop.start(); we always use
+  // runOnce() here so it's effectively a placeholder for now.
+  let intervalMs = 60_000;
   try {
-    const cfg = await readPollingConfig(opts.db);
-    if (!cfg.pollingEnabled) {
-      await recordPoll(opts.db);
-      logger.info('poll cycle no-op — pollingEnabled is false');
-      return {
-        fetched: 0,
-        createdPlans: 0,
-        skipped: 0,
-        failed: 0,
-        acked: 0,
-        disabled: true,
-        durationMs: Date.now() - t0,
-      };
-    }
-
-    const client = opts.client ?? getNeurocoreClient();
-    let listings: PendingListing[];
-    try {
-      listings = await client.pollPendingSignals();
-    } catch (err) {
-      if (err instanceof NeurocoreError) {
-        logger.warn(
-          { code: err.code, endpoint: err.endpoint, message: err.message },
-          'poll cycle: neurocore unreachable',
-        );
-        return {
-          fetched: 0,
-          createdPlans: 0,
-          skipped: 0,
-          failed: 0,
-          acked: 0,
-          disabled: false,
-          durationMs: Date.now() - t0,
-        };
+    intervalMs = getEnv().POLLING_INTERVAL_MS;
+  } catch {
+    // Test environment without env vars — fall back to the placeholder.
+  }
+  // Legacy-client path (integration tests): skip getSharedClient so we
+  // don't require a real Neurocore token. We still need a loop scaffold,
+  // so we import createPollingLoop directly from the shared package.
+  const nc = legacyClient ? null : await getSharedClient();
+  const createLoop = nc
+    ? nc.createPollingLoop.bind(nc)
+    : await getCreatePollingLoopNoSharedClient();
+  return createLoop<PendingListing>({
+    intervalMs,
+    pollFn: async () => {
+      if (legacyClient) return legacyClient.pollPendingSignals();
+      // Shape matches DREK's PendingListing because both mirror the
+      // server's listings collection.
+      return (await nc!.pollPendingListings()) as unknown as PendingListing[];
+    },
+    ackFn: async (id: string) => {
+      if (legacyClient) {
+        await legacyClient.ackSignal(id);
+        return;
       }
-      throw err;
-    }
-
-    let createdPlans = 0;
-    let skipped = 0;
-    let failed = 0;
-    let acked = 0;
-
-    for (const listing of listings) {
-      let processed: 'created' | 'skipped' | null = null;
+      await nc!.ackPendingListing(id);
+    },
+    getItemId: (listing) => listing.memoryId,
+    processItem: async (listing): Promise<ProcessResult> => {
+      // Let exceptions propagate so the shared loop counts them as
+      // itemsErrored. We log here for observability; the loop's own
+      // log is generic.
       try {
-        processed = await processListing(listing, opts.db);
-        if (processed === 'created') createdPlans++;
-        else if (processed === 'skipped') skipped++;
+        const outcome = await processListing(listing, db);
+        if (outcome === 'created') acc.createdPlans++;
+        else acc.skipped++;
+        return 'ack';
       } catch (err) {
-        failed++;
         logger.warn(
           {
             memoryId: listing.memoryId,
@@ -141,39 +141,107 @@ export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleRes
           },
           'poll cycle: failed to process listing',
         );
-        continue; // don't ack — let Neurocore return it next cycle
+        throw err;
       }
-      // Ack on success. Ack failure isn't fatal — local processing is done;
-      // dedup on findPlanByListing handles a re-delivery harmlessly.
-      try {
-        await client.ackSignal(listing.memoryId);
-        acked++;
-      } catch (ackErr) {
+    },
+    getEnabledFlag: async () => {
+      const cfg = await readPollingConfig(db);
+      return cfg.pollingEnabled;
+    },
+    onCycleComplete: () => {
+      void recordPoll(db).catch((err) => {
+        logger.warn({ err: (err as Error).message }, 'poll cycle: recordPoll failed');
+      });
+    },
+  });
+}
+
+/**
+ * Run one full poll cycle. Idempotent on the listing axis (existing plans
+ * are skipped) and on the ack axis (Neurocore's ack is idempotent — DREK
+ * sends a deterministic key).
+ */
+export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleResult> {
+  if (cycleInFlight) {
+    logger.info('poll-cycle skipped — another cycle is already running');
+    return zeroResult(0, false);
+  }
+  cycleInFlight = true;
+  const t0 = Date.now();
+  try {
+    const acc: CycleAccumulator = { createdPlans: 0, skipped: 0 };
+    let loop: PollingLoop;
+    try {
+      loop = await buildLoopReal(acc, opts.db, opts.client);
+    } catch (err) {
+      if (err instanceof NeurocoreError) {
         logger.warn(
-          { memoryId: listing.memoryId, err: (ackErr as Error).message },
-          'poll cycle: ack failed, will retry next cycle',
+          { code: err.code, endpoint: err.endpoint, message: err.message },
+          'poll cycle: neurocore unreachable (init)',
         );
+      } else {
+        logger.warn({ err: (err as Error).message }, 'poll cycle: failed to build loop');
       }
+      return zeroResult(Date.now() - t0, false);
     }
 
-    await recordPoll(opts.db);
+    let stats: CycleStats;
+    try {
+      stats = await loop.runOnce();
+    } catch (err) {
+      logger.error(
+        { err: (err as Error).message },
+        'poll cycle: loop.runOnce threw unexpectedly',
+      );
+      return zeroResult(Date.now() - t0, false);
+    }
+
     const durationMs = Date.now() - t0;
+    if (!stats.enabled) {
+      logger.info('poll cycle no-op — pollingEnabled is false');
+      return zeroResult(durationMs, true);
+    }
+    if (stats.unreachable) {
+      logger.warn('poll cycle: neurocore unreachable');
+      return zeroResult(durationMs, false);
+    }
+
     logger.info(
-      { fetched: listings.length, createdPlans, skipped, failed, acked, durationMs },
+      {
+        fetched: stats.itemsFetched,
+        createdPlans: acc.createdPlans,
+        skipped: acc.skipped,
+        failed: stats.itemsErrored,
+        acked: stats.itemsAcked,
+        durationMs,
+      },
       'poll cycle complete',
     );
+
     return {
-      fetched: listings.length,
-      createdPlans,
-      skipped,
-      failed,
-      acked,
+      fetched: stats.itemsFetched,
+      createdPlans: acc.createdPlans,
+      skipped: acc.skipped,
+      failed: stats.itemsErrored,
+      acked: stats.itemsAcked,
       disabled: false,
       durationMs,
     };
   } finally {
     cycleInFlight = false;
   }
+}
+
+function zeroResult(durationMs: number, disabled: boolean): PollCycleResult {
+  return {
+    fetched: 0,
+    createdPlans: 0,
+    skipped: 0,
+    failed: 0,
+    acked: 0,
+    disabled,
+    durationMs,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,11 +253,9 @@ async function processListing(
   db?: Firestore,
 ): Promise<'created' | 'skipped'> {
   if (!listing.listingId) {
-    // Should never happen given Gap 5's schema, but guard anyway.
     throw new Error('listing has no listingId');
   }
 
-  // Dedup: don't create a second plan if one already exists for this listing.
   const existing = await findPlanByListing(listing.listingId, db);
   if (existing) {
     logger.debug(
@@ -206,8 +272,6 @@ async function processListing(
     {
       type: 'cover_letter',
       title,
-      // Default 2-minute target — PRD §4.7 cover letter mode default.
-      // Rick adjusts per-plan via the M8 runtime input.
       targetRuntimeSeconds: 120,
       sourceListingId: listing.listingId,
       sourceListingText: listingText,
@@ -216,8 +280,6 @@ async function processListing(
     db,
   );
 
-  // Also surface the full listing in available_listings so M12's browser
-  // has the unfiltered PI context for manual selection later.
   await upsertListing(
     {
       id: listing.listingId,

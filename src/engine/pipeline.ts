@@ -24,11 +24,16 @@ export interface RunPipelineResult {
 }
 
 /**
- * Full pipeline in one chain: detect requirements (cover letter only) →
- * match projects → generate scenes + scripts.
+ * Full pipeline in one chain: detect requirements → match projects →
+ * generate scenes + scripts.
  *
- * Cover letter plans start at awaiting_review and run all three steps.
- * YouTube plans start at requirements_reviewed and run the final two.
+ * The requirements step runs whenever the plan is still at awaiting_review,
+ * regardless of type — detectRequirements self-dispatches by plan.type
+ * (v1 cover_letter path / v2 youtube_advanced brief path) and advances the
+ * plan to requirements_reviewed, which is the only legal predecessor of
+ * projects_matched. Plans that already enter at requirements_reviewed
+ * (e.g. youtube_lite, whose intake form sets that status) skip straight to
+ * matching.
  */
 export async function runPipeline(
   planId: string,
@@ -45,7 +50,7 @@ export async function runPipeline(
   }
 
   const requirementsResult =
-    plan.type === 'cover_letter' ? await detectRequirements(planId, opts) : null;
+    plan.status === 'awaiting_review' ? await detectRequirements(planId, opts) : null;
 
   const matchResult = await matchProjects(planId, opts);
   const { scenesResult, scriptsResult } = await generatePlanContent(planId, opts);

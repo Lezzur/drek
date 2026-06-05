@@ -144,9 +144,16 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
     plan.type === 'youtube_advanced' &&
     METADATA_GENERATED_OR_LATER.includes(plan.status);
 
+  // The "→" links navigate to other surfaces; for youtube_advanced plans the
+  // Footage + Deliverables links always show, so the nav row is present whenever
+  // the plan is advanced.
+  const showNavRow = plan.type === 'youtube_advanced';
+
   return (
     <div class="card" style="margin-bottom:16px;">
       <h3 class="section-label">Pipeline</h3>
+      {/* Row 1 — the actions that advance the plan. The current step's button
+          is the accent one; Run/Finalize/Export bookend the flow. */}
       <div class="row" style="gap:12px; flex-wrap:wrap;">
         <button
           class="btn"
@@ -172,14 +179,6 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
           >
             Generate hooks
           </button>
-        ) : null}
-        {showHookWorkshopLink ? (
-          <a
-            class="btn secondary"
-            href={`/plans/${plan.id}/workshop/hooks`}
-          >
-            Hook workshop →
-          </a>
         ) : null}
         {showGenerateShotList ? (
           <button
@@ -220,11 +219,6 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
             Generate titles
           </button>
         ) : null}
-        {showTitleWorkshopLink ? (
-          <a class="btn secondary" href={`/plans/${plan.id}/workshop/titles`}>
-            Title workshop →
-          </a>
-        ) : null}
         {showGenerateThumbnails ? (
           <button
             class="btn accent"
@@ -237,11 +231,6 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
             Generate thumbnails
           </button>
         ) : null}
-        {showThumbnailWorkshopLink ? (
-          <a class="btn secondary" href={`/plans/${plan.id}/workshop/thumbnails`}>
-            Thumbnail workshop →
-          </a>
-        ) : null}
         {showGenerateMetadata ? (
           <button
             class="btn accent"
@@ -253,26 +242,6 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
           >
             Generate metadata
           </button>
-        ) : null}
-        {showPublishLink ? (
-          <a class="btn secondary" href={`/plans/${plan.id}/publish`}>
-            Publishing →
-          </a>
-        ) : null}
-        {showPublishLink ? (
-          <a class="btn secondary" href={`/plans/${plan.id}/shorts`}>
-            Shorts workshop →
-          </a>
-        ) : null}
-        {plan.type === 'youtube_advanced' ? (
-          <a class="btn secondary" href={`/plans/${plan.id}/footage`}>
-            Footage →
-          </a>
-        ) : null}
-        {plan.type === 'youtube_advanced' ? (
-          <a class="btn secondary" href={`/plans/${plan.id}/deliverables`}>
-            Deliverables →
-          </a>
         ) : null}
         <span class="spacer" />
         <button
@@ -293,6 +262,32 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
           Export shoot instructions
         </a>
       </div>
+
+      {/* Row 2 — navigation to the other workshops/surfaces, de-emphasized so
+          they don't compete with the action you should take next. */}
+      {showNavRow ? (
+        <div class="row" style="gap:6px; flex-wrap:wrap; align-items:center; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-soft);">
+          <span class="muted" style="font-size:12px; margin-right:4px;">Go to:</span>
+          {showHookWorkshopLink ? (
+            <a class="btn linkish" href={`/plans/${plan.id}/workshop/hooks`}>Hook workshop →</a>
+          ) : null}
+          {showTitleWorkshopLink ? (
+            <a class="btn linkish" href={`/plans/${plan.id}/workshop/titles`}>Title workshop →</a>
+          ) : null}
+          {showThumbnailWorkshopLink ? (
+            <a class="btn linkish" href={`/plans/${plan.id}/workshop/thumbnails`}>Thumbnail workshop →</a>
+          ) : null}
+          {showPublishLink ? (
+            <a class="btn linkish" href={`/plans/${plan.id}/publish`}>Publishing →</a>
+          ) : null}
+          {showPublishLink ? (
+            <a class="btn linkish" href={`/plans/${plan.id}/shorts`}>Shorts workshop →</a>
+          ) : null}
+          <a class="btn linkish" href={`/plans/${plan.id}/footage`}>Footage →</a>
+          <a class="btn linkish" href={`/plans/${plan.id}/deliverables`}>Deliverables →</a>
+        </div>
+      ) : null}
+
       <div id="run-indicator" class="pipeline-indicator">
         Running pipeline — this usually takes a minute or two…
       </div>

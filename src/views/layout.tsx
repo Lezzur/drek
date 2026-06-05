@@ -45,6 +45,12 @@ const STYLES = `
   --header-color: #eae8e1;
   --surface-raised: #252522;
   --row-hover: #222220;
+  /* Accent + tones referenced by workshop/intake-detail views. Previously
+     undefined, which silently broke the "selected" highlight on title and
+     thumbnail concept cards (border/text fell back to currentColor). */
+  --accent: #6ba3e0;
+  --ink-1: #eae8e1;
+  --bg-subtle: #191917;
   --input-bg: #161614;
   --btn-primary-hover: #cbc9c2;
   --btn-secondary-hover: #252522;
@@ -140,6 +146,9 @@ h3.section-label {
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger:hover { background: #a00000; }
 .btn.small { padding: 6px 10px; font-size: 13px; border-radius: 5px; }
+/* Square 32x32 reorder buttons — comfortable tap target with a legible glyph,
+   replacing the cramped single-arrow .btn.small on the scene list. */
+.btn.scene-move { padding: 0; width: 32px; height: 32px; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
 .btn.linkish { background: transparent; border-color: transparent; color: var(--link); padding: 6px 8px; }
 .btn.linkish:hover { background: var(--blue-bg); text-decoration: none; }
 button.btn { font-family: inherit; }
@@ -531,12 +540,3 @@ export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
     </html>
   );
 };
-
-export function renderPage(props: LayoutProps): string {
-  // hono/jsx returns a string when stringified, so we can wrap directly.
-  // We embed in a full HTML doctype.
-  // The returned JSX is already a tree; hono renders it on c.html() — but
-  // for the route handler ergonomics we also expose this helper.
-  // (Actually unused for now; routes call c.html(<Layout>...) directly.)
-  return `<!doctype html>${Layout(props) as unknown as string}`;
-}

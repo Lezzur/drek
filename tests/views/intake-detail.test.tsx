@@ -422,7 +422,9 @@ describe('BriefDetailPage — score edit form reason field (M35)', () => {
     );
     expect(html).toContain('name="overrideReason"');
     expect(html).toContain('Why are you overriding?');
-    expect(html).toContain('score.overridden');
+    // Reason help text is plain language now, not the raw signal name.
+    expect(html).toContain('tune the scorer');
+    expect(html).not.toContain('score.overridden');
   });
 });
 

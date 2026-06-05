@@ -102,7 +102,7 @@ const PlansTable: FC<{ plans: Plan[] }> = ({ plans }) => {
               <td>
                 <a href={`/plans/${p.id}`} style="color:var(--link); font-weight:500;">{p.title}</a>
               </td>
-              <td><span class="muted">{p.type === 'cover_letter' ? 'Cover letter' : 'YouTube'}</span></td>
+              <td><span class="muted">{p.type === 'cover_letter' ? 'Cover letter' : p.type === 'youtube_advanced' ? 'YouTube (advanced)' : 'YouTube (lite)'}</span></td>
               <td><span class={`badge ${p.status}`}>{STATUS_LABELS[p.status]}</span></td>
               <td class="col-runtime"><span class="muted">{p.targetRuntimeSeconds}s</span></td>
               <td><span class="muted">{formatDate(p.updatedAt)}</span></td>

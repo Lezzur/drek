@@ -164,11 +164,11 @@ const StagePills: FC<{ currentStage?: BriefStage }> = ({ currentStage }) => {
 const COL_GRID =
   'grid-template-columns: 32px 1fr 80px 110px 110px auto; gap:12px; align-items:center;';
 
-const FindingsBadge: FC<{ count: number }> = ({ count }) => {
+const FindingsBadge: FC<{ count: number; briefId: string }> = ({ count, briefId }) => {
   if (count <= 0) return null;
   return (
     <a
-      href={`/intake/${''}#findings`}
+      href={`/intake/${briefId}#findings`}
       title={`${count} unresolved production-realism finding${count === 1 ? '' : 's'}`}
       style="
         display: inline-flex;
@@ -221,10 +221,10 @@ const BriefRow: FC<{ brief: PipelineBrief; findingsCount?: number }> = ({ brief,
               style="font-size:10px; padding:2px 6px; border-radius:4px; background:var(--amber-fg); color:var(--amber-bg, #1a1100); text-transform:uppercase; letter-spacing:0.04em; font-weight:600;"
               title={`Last touched ${formatDate(brief.updatedAt)} — over ${STALE_DAYS} days ago`}
             >
-              Queued
+              Stale
             </span>
           ) : null}
-          {findingsCount > 0 ? <FindingsBadge count={findingsCount} /> : null}
+          {findingsCount > 0 ? <FindingsBadge count={findingsCount} briefId={brief.id} /> : null}
         </div>
       </div>
 
@@ -442,7 +442,7 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
           <span
             class="muted"
             style="font-size:12px; padding:4px 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px;"
-            title="Edits accumulated toward the M34 pattern-analysis trigger. At 15 edits we review the corpus to teach Neurocore Rick's substitution + granularity preferences."
+            title="Build-plan edits logged since tracking started. At 15, review the accumulated edits to learn your tool-substitution and step-granularity preferences."
           >
             Build-plan edits: {buildPlanEditCount}/{M34_TRIGGER_THRESHOLD}
           </span>
@@ -451,7 +451,7 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
           <span
             class="muted"
             style="font-size:12px; padding:4px 10px; background:var(--surface); border:1px solid var(--border); border-radius:6px;"
-            title="Manual score overrides. At 15 we review the score.overridden corpus to detect scorer bias (e.g., scopeFit consistently underrated on briefs mentioning X stack)."
+            title="Manual score overrides logged. At 15, review them to detect scorer bias (e.g. scope-fit consistently underrated for a given stack)."
           >
             Score overrides: {scoreOverrideCount}/{SCORE_REVIEW_THRESHOLD}
           </span>
@@ -460,7 +460,7 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
         <a class="btn accent" href="/intake/batch/new">Add batch</a>
       </div>
       <p class="muted" style="margin: 6px 0 16px;">
-        Source and vet briefs before promoting them to youtube_advanced plans.
+        Source and vet briefs before promoting them to YouTube plans.
       </p>
 
       {m34Triggered ? (
@@ -472,11 +472,10 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
           <div style="flex:1; line-height:1.5;">
             <strong>{buildPlanEditCount} build-plan edits reached — time to review the corpus.</strong>
             <div style="margin-top:4px; font-size:13px; color:var(--ink-2);">
-              You've crossed the M34 trigger threshold ({M34_TRIGGER_THRESHOLD}+ edits).
-              Pull the <code>build_plan.edited</code> signals from Neurocore and
-              look for substitution patterns (e.g., tools you keep swapping) +
-              step-granularity drift. See the email{' '}
-              <em>"Tony — M34 trigger reminder"</em> for the full procedure.
+              You've passed {M34_TRIGGER_THRESHOLD}+ build-plan edits. Review the
+              saved edit history and look for substitution patterns (tools you
+              keep swapping) and step-granularity drift, then use them to tune
+              the build-plan generator.
             </div>
           </div>
         </div>
@@ -491,11 +490,10 @@ export const IntakeListPage: FC<IntakeListPageProps> = ({
           <div style="flex:1; line-height:1.5;">
             <strong>{scoreOverrideCount} score overrides reached — time to review scorer bias.</strong>
             <div style="margin-top:4px; font-size:13px; color:var(--ink-2);">
-              You've crossed the score-review threshold ({SCORE_REVIEW_THRESHOLD}+ overrides).
-              Pull the <code>score.overridden</code> signals from Neurocore and
-              look for systematic patterns — which axis gets corrected most often,
-              and what kind of briefs trigger the override. Use the findings to
-              re-tune the scoring prompt.
+              You've passed {SCORE_REVIEW_THRESHOLD}+ score overrides. Review the
+              saved override history and look for systematic patterns — which axis
+              gets corrected most often, and what kind of briefs trigger the
+              override. Use the findings to re-tune the scoring prompt.
             </div>
           </div>
         </div>

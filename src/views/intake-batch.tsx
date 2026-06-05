@@ -234,7 +234,7 @@ export interface BatchOverviewPageProps {
 }
 
 const STAGE_LABELS: Record<BriefStage, string> = {
-  candidate: 'Scored',
+  candidate: 'Candidate',
   vetted: 'Vetted',
   selected: 'Selected',
   in_production: 'In production',

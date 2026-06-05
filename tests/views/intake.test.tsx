@@ -244,7 +244,10 @@ describe('IntakeListPage', () => {
       IntakeListPage({ briefs: [], queueDepth: 5, scoreOverrideCount: 16 }),
     );
     expect(html).toContain('16 score overrides reached');
-    expect(html).toContain('score.overridden');
+    // Banner uses plain operator language (no internal signal/codename jargon).
+    expect(html).toContain('re-tune the scoring prompt');
+    expect(html).not.toContain('score.overridden');
+    expect(html).not.toContain('M34');
     // Counter pill hides once the banner takes over
     expect(html).not.toContain('Score overrides: 16/15');
   });

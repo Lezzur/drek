@@ -155,7 +155,7 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
           </label>
           <label style="display:block; margin-bottom:12px;">
             <div class="field-label" style="margin-bottom:4px;">
-              Why are you overriding? (optional — gold for Neurocore learning)
+              Why are you overriding? (optional — helps tune the scorer)
             </div>
             <input
               type="text"
@@ -164,10 +164,10 @@ const ScorePanel: FC<{ brief: PipelineBrief }> = ({ brief }) => {
               maxLength={800}
               style="width:100%;"
             />
-            <div class="muted" style="font-size:11px; margin-top:4px;">
-              Captured in the <code>score.overridden</code> signal so Neurocore
-              can learn what the scorer consistently misses. Skip if no specific
-              reason — the signal still fires on the score delta alone.
+            <div class="muted" style="font-size:12px; margin-top:4px;">
+              Saved with the override so you can learn what the scorer consistently
+              misses. Skip if there's no specific reason — the override is still
+              recorded on the score delta alone.
             </div>
           </label>
           <button class="btn small" type="submit">Save scores</button>
@@ -1067,12 +1067,15 @@ export const BriefDetailPage: FC<BriefDetailPageProps> = ({
         </div>
 
         <div>
-          <ScorePanel brief={brief} />
+          {/* Promote ("Send to pipeline") sits at the top of the sidebar — it's
+              the primary action on a vetted brief and shouldn't be buried below
+              the score panel. */}
           <PromoteForm
             brief={brief}
             formatProfiles={formatProfiles}
             audienceProfiles={audienceProfiles}
           />
+          <ScorePanel brief={brief} />
         </div>
       </div>
     </Layout>

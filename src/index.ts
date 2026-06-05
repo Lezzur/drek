@@ -10,11 +10,12 @@ import { initializeWriteQueue } from './neurocore/write-queue.js';
 import { refreshStackPerformance } from './cron/refresh-stack-performance.js';
 import { dailyAt } from './lib/scheduler.js';
 import { initModelConfigCache } from './engine/model-config.js';
+import { createShutdownHandler } from './shutdown.js';
 
 const env = getEnv();
 const app = createApp();
 
-serve(
+const server = serve(
   { fetch: app.fetch, port: env.PORT },
   (info) => {
     logger.info(
@@ -91,3 +92,9 @@ serve(
     }
   },
 );
+
+// Graceful shutdown: kill in-flight LLM children, stop accepting connections,
+// then exit. See src/shutdown.ts for the (unit-tested) logic.
+const shutdown = createShutdownHandler({ server });
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

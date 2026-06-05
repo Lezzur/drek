@@ -77,7 +77,7 @@ app.post('/deliverables/:deliverableId/generate-titles', async (c) => {
       );
     }
     logger.error({ deliverableId: id, err: (err as Error).message }, 'deliverable generate-titles failed');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -99,7 +99,7 @@ app.post('/deliverables/:deliverableId/generate-thumbnails', async (c) => {
       );
     }
     logger.error({ deliverableId: id, err: (err as Error).message }, 'deliverable generate-thumbnails failed');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -125,7 +125,7 @@ app.post('/deliverables/:deliverableId/select-title', async (c) => {
       );
     }
     logger.error({ deliverableId: id, err: (err as Error).message }, 'deliverable select-title failed');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -151,7 +151,7 @@ app.post('/deliverables/:deliverableId/select-thumbnail', async (c) => {
       );
     }
     logger.error({ deliverableId: id, err: (err as Error).message }, 'deliverable select-thumbnail failed');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 

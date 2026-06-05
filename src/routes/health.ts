@@ -21,7 +21,6 @@ const app = new Hono();
  */
 app.get('/healthz', async (c) => {
   let firestore: 'ok' | 'error' = 'ok';
-  let firestoreError: string | null = null;
 
   try {
     const t0 = Date.now();
@@ -29,7 +28,10 @@ app.get('/healthz', async (c) => {
     logger.debug({ ms: Date.now() - t0 }, 'firestore healthcheck');
   } catch (err) {
     firestore = 'error';
-    firestoreError = (err as Error).message;
+    // Log the real Firestore error for operators, but never put it in the
+    // unauthenticated /healthz body — it can leak project id, gRPC status,
+    // or a missing-index URL to anyone who can reach the endpoint.
+    logger.error({ err: (err as Error).message }, 'firestore healthcheck failed');
   }
 
   const writeQueueDepth = queueDepth();
@@ -60,7 +62,6 @@ app.get('/healthz', async (c) => {
     uptime: process.uptime(),
     checks: {
       firestore,
-      ...(firestoreError ? { firestoreError } : {}),
       neurocoreWriteQueue: deadLetters > 0 ? ('warn' as const) : ('ok' as const),
       neurocoreWriteQueueDepth: writeQueueDepth,
       neurocoreDeadLetterCount: deadLetters,

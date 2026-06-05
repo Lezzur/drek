@@ -8,6 +8,7 @@ import {
   DeliverableNotFoundError,
 } from '../db/deliverables.js';
 import { listScenes } from '../db/scenes.js';
+import { makeId } from '../db/ids.js';
 import { getFormatProfile, FormatProfileNotFoundError } from './format-profiles/index.js';
 import {
   getAudienceProfileClient,
@@ -211,10 +212,8 @@ function validateCandidates(
   return { valid: true };
 }
 
-let idCounter = 0;
 function makeShortCandidateId(): string {
-  idCounter += 1;
-  return `short_${Date.now().toString(36)}_${idCounter}`;
+  return makeId('short');
 }
 
 export interface ExtractShortsResult {

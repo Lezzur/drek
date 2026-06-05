@@ -39,6 +39,9 @@ const MIN_PROMPT_LEN = 1;
 const MAX_PROMPT_LEN = 200_000;
 const SIGTERM_GRACE_MS = 2_000;
 const MAX_ATTEMPTS = 2;
+// Short pause before a retry so a transiently overloaded CLI host isn't hit
+// twice back-to-back (which would also trip the circuit breaker faster).
+const RETRY_BACKOFF_MS = 750;
 
 const FAILURE_WINDOW_MS = 60_000;
 const FAILURE_THRESHOLD = 3;
@@ -302,6 +305,10 @@ export async function runCli(
       lastCode = 'NON_ZERO_EXIT';
     }
     recordFailure(config.providerName);
+    // Back off before the next attempt (not after the final one).
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS));
+    }
   }
 
   throw new LLMProviderError(

@@ -17,6 +17,7 @@ import { runPipeline } from '../engine/pipeline.js';
 import { PlanningEngineError } from '../engine/errors.js';
 import { changePlanFormatProfile } from '../engine/change-format.js';
 import { getNeurocoreClient } from '../neurocore/index.js';
+import { withPlanLock } from '../lib/plan-locks.js';
 
 const app = new Hono();
 
@@ -57,7 +58,9 @@ app.get('/plans/:id', async (c) => {
 app.post('/plans/:id/run', async (c) => {
   const id = c.req.param('id');
   try {
-    const result = await runPipeline(id, { client: getNeurocoreClient() });
+    const result = await withPlanLock(id, () =>
+      runPipeline(id, { client: getNeurocoreClient() }),
+    );
     const parts: string[] = [];
     if (result.requirementsResult) {
       const n = result.requirementsResult.requirements.length;
@@ -82,7 +85,7 @@ app.post('/plans/:id/run', async (c) => {
 app.post('/plans/:id/analyze', async (c) => {
   const id = c.req.param('id');
   try {
-    const result = await detectRequirements(id);
+    const result = await withPlanLock(id, () => detectRequirements(id));
     return renderPlanPage(c, id, {
       type: 'ok',
       message: `Extracted ${result.requirements.length} requirement${result.requirements.length === 1 ? '' : 's'}.`,
@@ -95,7 +98,9 @@ app.post('/plans/:id/analyze', async (c) => {
 app.post('/plans/:id/match', async (c) => {
   const id = c.req.param('id');
   try {
-    const result = await matchProjects(id, { client: getNeurocoreClient() });
+    const result = await withPlanLock(id, () =>
+      matchProjects(id, { client: getNeurocoreClient() }),
+    );
     const msg = result.degraded
       ? `Matched ${result.matchedProjects.length} project(s). Neurocore returned a degraded response — context may be thinner than usual.`
       : `Matched ${result.matchedProjects.length} project(s).`;
@@ -108,7 +113,9 @@ app.post('/plans/:id/match', async (c) => {
 app.post('/plans/:id/generate', async (c) => {
   const id = c.req.param('id');
   try {
-    const result = await generatePlanContent(id, { client: getNeurocoreClient() });
+    const result = await withPlanLock(id, () =>
+      generatePlanContent(id, { client: getNeurocoreClient() }),
+    );
     const scenes = result.scriptsResult.scenes.length;
     return renderPlanPage(c, id, {
       type: 'ok',
@@ -137,7 +144,7 @@ app.post('/plans/:id/finalize', async (c) => {
         message: 'Cannot finalize a plan with no scenes.',
       });
     }
-    await patchPlan(id, { status: 'finalized' });
+    await withPlanLock(id, () => patchPlan(id, { status: 'finalized' }));
     // Send approved scripts back to Neurocore for spoken-voice calibration.
     try {
       const client = getNeurocoreClient();
@@ -189,7 +196,7 @@ app.post('/plans/:id/change-format', async (c) => {
   }
 
   try {
-    await changePlanFormatProfile(id, body.formatProfileId);
+    await withPlanLock(id, () => changePlanFormatProfile(id, body.formatProfileId!));
     // HTMX: redirect to plan detail with success flash.
     c.header('HX-Redirect', `/plans/${id}?flash=format-changed`);
     return c.text('', 200);
@@ -206,7 +213,7 @@ app.post('/plans/:id/change-format', async (c) => {
       }
     }
     logger.error({ planId: id, err: (err as Error).message }, 'change-format: unexpected error');
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: 'Internal server error', code: 'INTERNAL_ERROR' }, 500);
   }
 });
 
@@ -221,7 +228,7 @@ app.post('/plans/:id/change-format', async (c) => {
 app.post('/plans/:id/generate-hooks', async (c) => {
   const id = c.req.param('id');
   try {
-    await generateHookVariants(id);
+    await withPlanLock(id, () => generateHookVariants(id));
     c.header('HX-Redirect', `/plans/${id}/workshop/hooks`);
     return c.text('', 200);
   } catch (err) {
@@ -233,7 +240,7 @@ app.post('/plans/:id/generate-hooks', async (c) => {
       return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
     }
     logger.error({ planId: id, err: (err as Error).message }, 'generate-hooks: unexpected error');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -266,7 +273,7 @@ app.post('/plans/:id/select-hook', async (c) => {
   }
 
   try {
-    await selectHook(id, hookId);
+    await withPlanLock(id, () => selectHook(id, hookId!));
     c.header('HX-Redirect', `/plans/${id}/workshop/hooks`);
     return c.text('', 200);
   } catch (err) {
@@ -278,7 +285,7 @@ app.post('/plans/:id/select-hook', async (c) => {
       return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
     }
     logger.error({ planId: id, err: (err as Error).message }, 'select-hook: unexpected error');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -308,7 +315,7 @@ function errorToFlash(
 app.post('/plans/:id/generate-shot-list', async (c) => {
   const id = c.req.param('id');
   try {
-    await generateShotList(id);
+    await withPlanLock(id, () => generateShotList(id));
     c.header('HX-Redirect', `/plans/${id}`);
     return c.text('', 200);
   } catch (err) {
@@ -320,7 +327,7 @@ app.post('/plans/:id/generate-shot-list', async (c) => {
       return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
     }
     logger.error({ planId: id, err: (err as Error).message }, 'generate-shot-list: unexpected error');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -333,7 +340,7 @@ app.post('/plans/:id/generate-titles', async (c) => {
   const id = c.req.param('id');
   try {
     const longForm = await findLongFormDeliverable(id);
-    await generateTitleVariants(longForm.id);
+    await withPlanLock(id, () => generateTitleVariants(longForm.id));
     c.header('HX-Redirect', `/plans/${id}/workshop/titles`);
     return c.text('', 200);
   } catch (err) {
@@ -345,7 +352,7 @@ app.post('/plans/:id/generate-titles', async (c) => {
       return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
     }
     logger.error({ planId: id, err: (err as Error).message }, 'generate-titles: unexpected error');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -357,7 +364,7 @@ app.post('/plans/:id/generate-thumbnails', async (c) => {
   const id = c.req.param('id');
   try {
     const longForm = await findLongFormDeliverable(id);
-    await generateThumbnailConcepts(longForm.id);
+    await withPlanLock(id, () => generateThumbnailConcepts(longForm.id));
     c.header('HX-Redirect', `/plans/${id}/workshop/thumbnails`);
     return c.text('', 200);
   } catch (err) {
@@ -369,7 +376,7 @@ app.post('/plans/:id/generate-thumbnails', async (c) => {
       return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
     }
     logger.error({ planId: id, err: (err as Error).message }, 'generate-thumbnails: unexpected error');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -400,7 +407,7 @@ app.post('/plans/:id/generate-publish-metadata', async (c) => {
   const id = c.req.param('id');
   try {
     const longForm = await findLongFormDeliverable(id);
-    await generatePublishMetadata(longForm.id);
+    await withPlanLock(id, () => generatePublishMetadata(longForm.id));
     c.header('HX-Redirect', `/deliverables/${longForm.id}/publish`);
     return c.text('', 200);
   } catch (err) {
@@ -412,7 +419,7 @@ app.post('/plans/:id/generate-publish-metadata', async (c) => {
       return c.json({ error: { code: err.code, message: err.message } }, status as 400 | 404 | 500);
     }
     logger.error({ planId: id, err: (err as Error).message }, 'generate-publish-metadata: unexpected error');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 

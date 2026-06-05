@@ -631,6 +631,21 @@ export async function transformBrief(
       opts.db,
     );
   } catch (err) {
+    // The brief patch failed after findings were already persisted (findings
+    // must be written before the revisor runs, so they can't be deferred past
+    // this point). Roll them back so they don't dangle, referencing a
+    // transformedBuildPlan that was never saved. Best-effort — the next
+    // re-transform also clears findings up front.
+    if (persistedFindings.length > 0) {
+      try {
+        await deleteFindingsByBriefId(briefId, opts.db);
+      } catch (cleanupErr) {
+        logger.warn(
+          { briefId, err: (cleanupErr as Error).message },
+          'transform-brief: failed to roll back findings after brief-patch failure',
+        );
+      }
+    }
     throw new IntakeError(
       'PERSIST_FAILED',
       `failed to persist transformed brief: ${(err as Error).message}`,

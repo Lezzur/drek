@@ -19,7 +19,7 @@ app.post('/admin/refresh-model-config', async (c) => {
     return c.json({ refreshed: true });
   } catch (err) {
     logger.error({ err: (err as Error).message }, 'model-config: manual refresh failed');
-    return c.json({ refreshed: false, error: (err as Error).message }, 500);
+    return c.json({ refreshed: false, error: 'Internal server error' }, 500);
   }
 });
 

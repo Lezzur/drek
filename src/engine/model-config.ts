@@ -34,6 +34,9 @@ export interface ModelConfig {
 /* ─── Module-level cache ───────────────────────────────────────────────── */
 
 let _cache: ModelConfig | null = null;
+// Dedups concurrent cache-miss fetches so two simultaneous first callers don't
+// both hit Neurocore.
+let _inFlight: Promise<ModelConfig> | null = null;
 let _refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let _client: NeurocoreClient | null = null;
 
@@ -50,6 +53,7 @@ export function _setClientForTests(client: NeurocoreClient | null): void {
 /** Test helper — reset the in-memory cache and stop the refresh timer. */
 export function _resetCacheForTests(): void {
   _cache = null;
+  _inFlight = null;
   if (_refreshTimer !== null) {
     clearTimeout(_refreshTimer);
     _refreshTimer = null;
@@ -108,28 +112,37 @@ function scheduleNextRefresh(): void {
  */
 export async function getModelConfig(): Promise<ModelConfig> {
   if (_cache !== null) return _cache;
+  // Coalesce concurrent cache-miss callers onto a single fetch.
+  if (_inFlight !== null) return _inFlight;
 
   // Cache miss — attempt a synchronous fetch (happens if getModelConfig is
   // called before initModelConfigCache fires, e.g. in tests or on the first
   // transform request before the boot timer finishes).
-  try {
-    _cache = await fetchFromNeurocore();
-    logger.info({ source: 'neurocore' }, 'model-config: fetched on demand');
-    scheduleNextRefresh();
-    return _cache;
-  } catch (err) {
-    const isNeuroError = err instanceof NeurocoreError;
-    logger.warn(
-      {
-        err: (err as Error).message,
-        code: isNeuroError ? (err as NeurocoreError).code : undefined,
-      },
-      'model-config: Neurocore unreachable, falling back to env defaults',
-    );
-    _cache = buildEnvFallback();
-    scheduleNextRefresh();
-    return _cache;
-  }
+  _inFlight = (async () => {
+    try {
+      const cfg = await fetchFromNeurocore();
+      _cache = cfg;
+      logger.info({ source: 'neurocore' }, 'model-config: fetched on demand');
+      scheduleNextRefresh();
+      return cfg;
+    } catch (err) {
+      const isNeuroError = err instanceof NeurocoreError;
+      logger.warn(
+        {
+          err: (err as Error).message,
+          code: isNeuroError ? (err as NeurocoreError).code : undefined,
+        },
+        'model-config: Neurocore unreachable, falling back to env defaults',
+      );
+      const fallback = buildEnvFallback();
+      _cache = fallback;
+      scheduleNextRefresh();
+      return fallback;
+    } finally {
+      _inFlight = null;
+    }
+  })();
+  return _inFlight;
 }
 
 /**

@@ -14,7 +14,8 @@ export type IdPrefix =
   | 'thumb'      // ThumbnailConcept
   | 'pubmeta'    // PublishMetadata (only one per Deliverable, but prefixed for consistency)
   | 'rec'        // RecordingSession
-  | 'finding';   // M36: CritiqueFinding (production-realism critic output)
+  | 'finding'    // M36: CritiqueFinding (production-realism critic output)
+  | 'short';     // transient Short-extraction candidate id (pre-approval)
 
 export function makeId(prefix: IdPrefix): string {
   return `${prefix}_${randomUUID().replace(/-/g, '')}`;

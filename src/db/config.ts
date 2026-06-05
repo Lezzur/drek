@@ -37,9 +37,12 @@ export async function patchPollingConfig(
   db: Firestore = getDb(),
 ): Promise<PollingConfig> {
   const ref = db.collection(COLLECTION).doc(DOC);
+  // Validate before persisting so a bad value can't be written and then blow
+  // up the next readPollingConfig (which parses strictly).
+  const clean = pollingConfigSchema.partial().parse(patch);
   // Use set+merge so the doc is created on first patch. patch values pass
   // through unchanged (Firestore stores Date as Timestamp automatically).
-  await ref.set(patch, { merge: true });
+  await ref.set(clean, { merge: true });
   return readPollingConfig(db);
 }
 

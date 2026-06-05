@@ -241,12 +241,15 @@ export async function deleteFindingsByBriefId(
   return { deleted: snap.docs.length };
 }
 
-// FIRESTORE-INDEX: critique_findings(status:ASC, severity:ASC, createdAt:DESC)
+// FIRESTORE-INDEX: critique_findings(status:ASC, createdAt:DESC)
 /**
  * List-view badge query: returns a map of `briefId → unresolved count` for
- * every brief that currently has at least one unresolved finding. Uses
- * the leftmost prefix of the (status, severity, createdAt) composite
- * index so no new index is required.
+ * every brief that currently has at least one unresolved finding.
+ *
+ * Requires its own (status, createdAt) composite index. The (status,
+ * severity, createdAt) index does NOT serve this query: Firestore cannot
+ * skip the intermediate `severity` field to satisfy an equality on `status`
+ * plus an orderBy on `createdAt`, so a dedicated two-field index is needed.
  *
  * Bounded at 500 — far above what a healthy operator backlog ever reaches.
  * If we hit the cap, the list view will under-report counts, which is a

@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
 import { getPlan, patchPlan } from '../db/plans.js';
-import { listScenes, patchScene } from '../db/scenes.js';
+import { listScenes, patchScenesBatch } from '../db/scenes.js';
+import type { ScenePatch } from '../db/schemas.js';
 import { getSelectedHookDraft } from '../db/hook-drafts.js';
 import {
   isAllowedPlanTransition,
@@ -198,28 +199,30 @@ export async function writeScripts(
     }
   }
 
-  // ---- Persist scripts on each scene + transition plan ----------------
+  // ---- Persist scripts on every scene in one atomic batch -------------
+  // Build the updates and the returned scene views up front, then commit
+  // together so a mid-write failure can't leave some scenes with new scripts
+  // and others with old.
   let totalSeconds = 0;
+  const sceneUpdates: Array<{ id: string; patch: ScenePatch }> = [];
   const updatedScenes: Scene[] = [];
+  for (const s of scripts) {
+    const estDur = estimateSceneSeconds(s.script);
+    totalSeconds += estDur;
+    const patch: ScenePatch = {
+      script: s.script,
+      scriptDraft: s.script,
+      emphasisCues: s.emphasisCues,
+      pacingNotes: s.pacingNotes,
+      transitionNote: s.transitionNote,
+      estimatedDurationSeconds: estDur,
+    };
+    sceneUpdates.push({ id: s.sceneId, patch });
+    const base = scenes.find((sc) => sc.id === s.sceneId);
+    if (base) updatedScenes.push({ ...base, ...patch });
+  }
   try {
-    for (const s of scripts) {
-      const estDur = estimateSceneSeconds(s.script);
-      totalSeconds += estDur;
-      const updated = await patchScene(
-        planId,
-        s.sceneId,
-        {
-          script: s.script,
-          scriptDraft: s.script,
-          emphasisCues: s.emphasisCues,
-          pacingNotes: s.pacingNotes,
-          transitionNote: s.transitionNote,
-          estimatedDurationSeconds: estDur,
-        },
-        opts.db,
-      );
-      if (updated) updatedScenes.push(updated);
-    }
+    await patchScenesBatch(planId, sceneUpdates, opts.db);
   } catch (err) {
     throw new PlanningEngineError(
       STEP_NAME,

@@ -16,7 +16,7 @@ describe('format profile registry', () => {
   it('getFormatProfile returns the registered profile by id', () => {
     const profile = getFormatProfile('claude_code_build_along');
     expect(profile.id).toBe('claude_code_build_along');
-    expect(profile.displayName).toBe('Claude Code Build-Along');
+    expect(profile.displayName).toBe('Build-Along');
   });
 
   it('getFormatProfile throws FormatProfileNotFoundError on unknown id', () => {
@@ -32,8 +32,9 @@ describe('format profile registry', () => {
 
   it('listFormatProfiles returns all registered profiles', () => {
     const all = listFormatProfiles();
-    expect(all.length).toBeGreaterThanOrEqual(1);
+    expect(all.length).toBeGreaterThanOrEqual(2);
     expect(all.map((p) => p.id)).toContain('claude_code_build_along');
+    expect(all.map((p) => p.id)).toContain('tutorial');
   });
 
   it('registry is frozen — cannot accidentally mutate at runtime', () => {
@@ -94,5 +95,77 @@ describe('claude_code_build_along profile shape', () => {
 
   it('hookGuidelines includes guidance about the cold open', () => {
     expect(profile.hookGuidelines.toLowerCase()).toContain('cold open');
+  });
+});
+
+describe('tutorial profile shape', () => {
+  const profile = getFormatProfile('tutorial');
+
+  it('declares the procedural 8-beat order', () => {
+    const beatNames = profile.beats.map((b) => b.name);
+    expect(beatNames).toEqual([
+      'cold_open',
+      'goal_and_prereqs',
+      'architecture',
+      'implementation_core',
+      'implementation_hardening',
+      'live_run',
+      'extend_and_pitfalls',
+      'outro',
+    ]);
+  });
+
+  it('sum of beat target durations lands inside runtimeRange', () => {
+    const sum = profile.beats.reduce((acc, b) => acc + b.targetDurationSeconds, 0);
+    const [min, max] = profile.runtimeRange;
+    expect(sum).toBeGreaterThanOrEqual(min);
+    expect(sum).toBeLessThanOrEqual(max);
+  });
+
+  it('every beat has a non-empty description and at least one shot convention', () => {
+    for (const beat of profile.beats) {
+      expect(beat.name).toMatch(/^[a-z][a-z_]*$/);
+      expect(beat.targetDurationSeconds).toBeGreaterThan(0);
+      expect(beat.description.length).toBeGreaterThan(0);
+      expect(beat.shotConventions.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('sceneRange is sane', () => {
+    const [min, max] = profile.sceneRange;
+    expect(min).toBeGreaterThan(0);
+    expect(max).toBeGreaterThanOrEqual(min);
+  });
+
+  it('pacingRules has positive wpm', () => {
+    expect(profile.pacingRules.wordsPerMinute).toBeGreaterThan(0);
+    expect(profile.pacingRules.sentenceLengthGuide.length).toBeGreaterThan(0);
+  });
+
+  it('declares at least 3 anti-patterns', () => {
+    expect(profile.antiPatterns.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('ctaPolicy is non-empty', () => {
+    expect(profile.ctaPolicy.length).toBeGreaterThan(0);
+  });
+
+  it('hookGuidelines includes guidance about the cold open', () => {
+    expect(profile.hookGuidelines.toLowerCase()).toContain('cold open');
+  });
+
+  it('hookGuidelines references only valid HOOK_ARCHETYPES values', () => {
+    // The hook archetype enum (schemas.ts HOOK_ARCHETYPES) is what the
+    // generator validates LLM output against. Recommended archetypes in
+    // guidelines must be drawn from it so the model has valid options.
+    const validArchetypes = [
+      'pattern_interrupt',
+      'bold_claim',
+      'retention_question',
+      'story_cold_open',
+      'demo_first',
+    ];
+    const mentioned = validArchetypes.filter((a) => profile.hookGuidelines.includes(a));
+    expect(mentioned.length).toBeGreaterThanOrEqual(2);
   });
 });

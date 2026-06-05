@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
 import { getPlan, patchPlan } from '../db/plans.js';
-import { createScene, listScenes, deleteScene } from '../db/scenes.js';
+import { replaceAllScenes } from '../db/scenes.js';
 import { findLongFormDeliverable, DeliverableNotFoundError } from '../db/deliverables.js';
 import {
   SCENE_INTERFACE_TYPES,
@@ -177,46 +177,28 @@ async function generateScenesV1(
     throw err;
   }
 
-  // ---- Wipe existing scenes (clean regenerate) ---------------------
+  // ---- Atomically replace scenes (delete old + write new in one batch) ----
+  // All-or-nothing: a failure here can never leave the plan with zero or
+  // partially-written scenes (see replaceAllScenes).
+  let created: Scene[];
   try {
-    const existing = await listScenes(planId, opts.db);
-    for (const old of existing) {
-      await deleteScene(planId, old.id, opts.db);
-    }
-  } catch (err) {
-    throw new PlanningEngineError(
-      STEP_NAME,
-      'PERSIST_FAILED',
-      `failed to clear old scenes: ${(err as Error).message}`,
-      { planId },
+    created = await replaceAllScenes(
+      planId,
+      generated.map((g) => ({
+        title: g.title,
+        description: g.description,
+        framingNotes: g.framingNotes,
+        script: '', // Call 4 fills this in
+        estimatedDurationSeconds: g.estimatedDurationSeconds ?? 0,
+        projectRef: g.projectRef ?? null,
+      })),
+      opts.db,
     );
-  }
-
-  // ---- Persist new scenes ------------------------------------------
-  const created: Scene[] = [];
-  try {
-    for (let i = 0; i < generated.length; i++) {
-      const g = generated[i]!;
-      const scene = await createScene(
-        planId,
-        {
-          title: g.title,
-          description: g.description,
-          framingNotes: g.framingNotes,
-          script: '', // Call 4 fills this in
-          order: i + 1,
-          estimatedDurationSeconds: g.estimatedDurationSeconds ?? 0,
-          projectRef: g.projectRef ?? null,
-        },
-        opts.db,
-      );
-      created.push(scene);
-    }
   } catch (err) {
     throw new PlanningEngineError(
       STEP_NAME,
       'PERSIST_FAILED',
-      `failed to persist scene ${created.length + 1}: ${(err as Error).message}`,
+      `failed to persist scenes: ${(err as Error).message}`,
       { planId },
     );
   }
@@ -503,47 +485,29 @@ RULES:
     throw err;
   }
 
-  // ---- Wipe existing scenes (clean regenerate) -------------------------
+  // ---- Atomically replace scenes (delete old + write new in one batch) ----
+  // All-or-nothing: a failure here can never leave the plan with zero or
+  // partially-written scenes (see replaceAllScenes).
+  let created: Scene[];
   try {
-    const existing = await listScenes(planId, opts.db);
-    for (const old of existing) {
-      await deleteScene(planId, old.id, opts.db);
-    }
-  } catch (err) {
-    throw new PlanningEngineError(
-      STEP_NAME,
-      'PERSIST_FAILED',
-      `failed to clear old scenes: ${(err as Error).message}`,
-      { planId },
+    created = await replaceAllScenes(
+      planId,
+      generated.map((g) => ({
+        title: g.title,
+        description: g.description,
+        framingNotes: g.framingNotes,
+        script: '', // write-scripts step fills these in
+        estimatedDurationSeconds: g.estimatedDurationSeconds,
+        projectRef: g.projectRef ?? null,
+        beatTag: g.beatTag,
+      })),
+      opts.db,
     );
-  }
-
-  // ---- Persist new scenes + advance status to scenes_generated ---------
-  const created: Scene[] = [];
-  try {
-    for (let i = 0; i < generated.length; i++) {
-      const g = generated[i]!;
-      const scene = await createScene(
-        planId,
-        {
-          title: g.title,
-          description: g.description,
-          framingNotes: g.framingNotes,
-          script: '', // write-scripts step fills these in
-          order: i + 1,
-          estimatedDurationSeconds: g.estimatedDurationSeconds,
-          projectRef: g.projectRef ?? null,
-          beatTag: g.beatTag,
-        },
-        opts.db,
-      );
-      created.push(scene);
-    }
   } catch (err) {
     throw new PlanningEngineError(
       STEP_NAME,
       'PERSIST_FAILED',
-      `failed to persist scene ${created.length + 1}: ${(err as Error).message}`,
+      `failed to persist scenes: ${(err as Error).message}`,
       { planId },
     );
   }

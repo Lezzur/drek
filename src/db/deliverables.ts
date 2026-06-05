@@ -1,6 +1,8 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { getDb } from './firestore.js';
 import { makeId } from './ids.js';
+import { logger } from '../logger.js';
+import { deleteAllMatching } from './batch-utils.js';
 import {
   deliverableSchema,
   type Deliverable,
@@ -128,8 +130,13 @@ export async function findLongFormDeliverable(
     );
   }
   if (matches.length > 1) {
-    // Defensive: invariant violation, but don't throw — return the first
-    // and log via the route layer instead.
+    // Defensive: invariant violation (a plan should have exactly one long_form
+    // deliverable). Don't throw — return the first — but surface the data bug
+    // so it doesn't stay invisible and query-order-dependent.
+    logger.warn(
+      { planId, count: matches.length, ids: matches.map((m) => m.id) },
+      'findLongFormDeliverable: more than one long_form deliverable for plan — returning first',
+    );
     return matches[0]!;
   }
   return matches[0]!;
@@ -166,12 +173,8 @@ export async function deleteDeliverable(
 
   const SUBCOLLECTIONS = ['title_concepts', 'thumbnail_concepts', 'publish_metadata'];
   for (const sub of SUBCOLLECTIONS) {
-    const subSnap = await ref.collection(sub).limit(500).get();
-    if (!subSnap.empty) {
-      const batch = db.batch();
-      for (const d of subSnap.docs) batch.delete(d.ref);
-      await batch.commit();
-    }
+    // Chunked drain so a subcollection with >500 docs is fully removed.
+    await deleteAllMatching(ref.collection(sub), db);
   }
   await ref.delete();
   return true;

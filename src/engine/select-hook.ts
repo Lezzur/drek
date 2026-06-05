@@ -1,7 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { logger } from '../logger.js';
-import { getPlan, patchPlan } from '../db/plans.js';
-import { listHookDraftsForPlan, setSelectedHookDraft } from '../db/hook-drafts.js';
+import { getPlan } from '../db/plans.js';
+import { listHookDraftsForPlan, setSelectedHookDraftWithPlanUpdate } from '../db/hook-drafts.js';
 import { PlanningEngineError } from './errors.js';
 
 /**
@@ -54,11 +54,16 @@ export async function selectHook(
     );
   }
 
-  // ---- Atomically flip selection flags ----------------------------------
-  await setSelectedHookDraft(planId, hookId, db);
-
-  // ---- Update plan ------------------------------------------------------
-  await patchPlan(planId, { selectedHookVariantId: hookId, status: 'hook_selected' }, db);
+  // ---- Atomically flip selection flags AND advance the plan -------------
+  // One batch: the hook subcollection and plan.selectedHookVariantId/status
+  // can't desync if the write fails partway. The status transition was already
+  // validated above (hooks_generated|hook_selected → hook_selected is allowed).
+  await setSelectedHookDraftWithPlanUpdate(
+    planId,
+    hookId,
+    { selectedHookVariantId: hookId, status: 'hook_selected', updatedAt: new Date() },
+    db,
+  );
 
   logger.info(
     { planId, hookId, archetype: targetDraft.archetype },

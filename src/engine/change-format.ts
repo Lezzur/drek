@@ -7,7 +7,8 @@ import {
   deleteDeliverable,
   DeliverableNotFoundError,
 } from '../db/deliverables.js';
-import { getFormatProfile, FORMAT_PROFILES } from './format-profiles/index.js';
+import { FORMAT_PROFILES } from './format-profiles/index.js';
+import { deleteAllMatching } from '../db/batch-utils.js';
 import { PlanningEngineError } from './errors.js';
 import { logger } from '../logger.js';
 
@@ -127,39 +128,30 @@ export async function changePlanFormatProfile(
   // Collect all short_clip deliverables for this plan so we can delete them.
   const shortClipDeliverables = await listDeliverablesForPlan(planId, { kind: 'short_clip' }, db);
 
-  // ---- Build wipe batch ------------------------------------------------
+  // ---- Drain derived subcollections ------------------------------------
   //
-  // Production note: this would be wrapped in db.runTransaction() for strict
-  // atomicity. The fake Firestore used in tests doesn't implement
-  // runTransaction, so we use a plain batch() which provides the same atomic
-  // semantics for the operations below (Firestore batches are atomic in
-  // production too).
-
-  const batch = db.batch();
-
-  // 1. Delete all scenes under the plan.
-  const scenesSnap = await db.collection('plans').doc(planId).collection('scenes').limit(500).get();
-  for (const d of scenesSnap.docs) {
-    batch.delete(d.ref);
-  }
-
-  // 2. Delete all hook drafts under the plan.
-  const hooksSnap = await db.collection('plans').doc(planId).collection('hook_drafts').limit(500).get();
-  for (const d of hooksSnap.docs) {
-    batch.delete(d.ref);
-  }
-
-  // 3. Wipe long_form Deliverable subcollections: title_concepts, thumbnail_concepts,
-  //    publish_metadata/current.
+  // Done as chunked drains (not one big batch) so a plan with many scenes can
+  // never silently orphan docs past 500, nor overflow Firestore's 500-op batch
+  // limit and throw mid-wipe. A crash between a drain and the field-reset below
+  // is self-healing: re-running change-format re-drains (a no-op) and completes
+  // the reset. The user-visible state flip (plan + deliverable fields) stays
+  // atomic in the single batch that follows.
   const longFormRef = db.collection('deliverables').doc(longFormDeliverable.id);
+  const scenesWiped = await deleteAllMatching(
+    db.collection('plans').doc(planId).collection('scenes'),
+    db,
+  );
+  const hookDraftsWiped = await deleteAllMatching(
+    db.collection('plans').doc(planId).collection('hook_drafts'),
+    db,
+  );
   for (const subCol of ['title_concepts', 'thumbnail_concepts', 'publish_metadata'] as const) {
-    const subSnap = await longFormRef.collection(subCol).limit(500).get();
-    for (const d of subSnap.docs) {
-      batch.delete(d.ref);
-    }
+    await deleteAllMatching(longFormRef.collection(subCol), db);
   }
 
-  // 4. Reset long_form Deliverable fields.
+  // ---- Atomic field reset ----------------------------------------------
+  // Plan + long_form Deliverable flip together: either both revert or neither.
+  const batch = db.batch();
   batch.update(longFormRef, {
     selectedTitleVariantId: null,
     selectedThumbnailConceptId: null,
@@ -167,8 +159,6 @@ export async function changePlanFormatProfile(
     status: 'draft',
     updatedAt: now,
   });
-
-  // 5. Reset Plan fields + update formatProfileId + revert status.
   batch.update(db.collection('plans').doc(planId), {
     selectedHookVariantId: null,
     selectedTitleVariantId: null,
@@ -178,8 +168,6 @@ export async function changePlanFormatProfile(
     status: 'projects_matched',
     updatedAt: now,
   });
-
-  // Commit the main batch atomically.
   await batch.commit();
 
   // 6. Delete short_clip Deliverables (and their subcollections) separately
@@ -204,8 +192,8 @@ export async function changePlanFormatProfile(
       planId,
       newFormatProfileId,
       previousStatus: plan.status,
-      scenesWiped: scenesSnap.docs.length,
-      hookDraftsWiped: hooksSnap.docs.length,
+      scenesWiped,
+      hookDraftsWiped,
       shortClipsWiped: shortClipDeliverables.length,
     },
     'change-format: wipe-and-revert complete',

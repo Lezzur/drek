@@ -45,6 +45,12 @@ const STYLES = `
   --header-color: #eae8e1;
   --surface-raised: #252522;
   --row-hover: #222220;
+  /* Accent + tones referenced by workshop/intake-detail views. Previously
+     undefined, which silently broke the "selected" highlight on title and
+     thumbnail concept cards (border/text fell back to currentColor). */
+  --accent: #6ba3e0;
+  --ink-1: #eae8e1;
+  --bg-subtle: #191917;
   --input-bg: #161614;
   --btn-primary-hover: #cbc9c2;
   --btn-secondary-hover: #252522;
@@ -140,6 +146,9 @@ h3.section-label {
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger:hover { background: #a00000; }
 .btn.small { padding: 6px 10px; font-size: 13px; border-radius: 5px; }
+/* Square 32x32 reorder buttons — comfortable tap target with a legible glyph,
+   replacing the cramped single-arrow .btn.small on the scene list. */
+.btn.scene-move { padding: 0; width: 32px; height: 32px; font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
 .btn.linkish { background: transparent; border-color: transparent; color: var(--link); padding: 6px 8px; }
 .btn.linkish:hover { background: var(--blue-bg); text-decoration: none; }
 button.btn { font-family: inherit; }
@@ -181,6 +190,8 @@ button.btn { font-family: inherit; }
 .row { display: flex; gap: 8px; align-items: center; }
 .spacer { flex: 1; }
 .muted { color: var(--ink-3); font-size: 14px; }
+.back-link { display: inline-block; font-size: 14px; color: var(--ink-3); text-decoration: none; }
+.back-link:hover { color: var(--ink-2); text-decoration: none; }
 .empty {
   text-align: center;
   padding: 32px 16px;
@@ -190,6 +201,7 @@ button.btn { font-family: inherit; }
   border: 1px dashed var(--border-strong);
   border-radius: 10px;
 }
+.empty.lg { padding: 48px 24px; }
 form.inline { display: block; width: 100%; margin: 0; }
 input[type="text"], input[type="number"], input[type="url"], select {
   padding: 9px 12px;
@@ -468,6 +480,24 @@ const CONFIRM_SCRIPT = `
     var m = getModal();
     if (m) m.classList.remove('open');
   }
+  // Reusable styled confirm. Shows the modal with \`message\`; runs onConfirm()
+  // only if the user clicks Confirm. Both the htmx:confirm handler and custom
+  // scripts (e.g. the intake bulk actions) go through this so every
+  // confirmation looks the same. Falls back to native confirm() if the modal
+  // markup is somehow absent.
+  function drekConfirm(message, onConfirm) {
+    var msgEl = getMsgEl();
+    var modal = getModal();
+    var okBtn = getOkBtn();
+    if (!msgEl || !modal || !okBtn) {
+      if (window.confirm(message) && onConfirm) onConfirm();
+      return;
+    }
+    msgEl.textContent = message;
+    modal.classList.add('open');
+    okBtn.onclick = function () { close(); if (onConfirm) onConfirm(); };
+  }
+  window.drekConfirm = drekConfirm;
   document.addEventListener('DOMContentLoaded', function () {
     var cancelBtn = getCancelBtn();
     var modal = getModal();
@@ -477,16 +507,16 @@ const CONFIRM_SCRIPT = `
   document.addEventListener('htmx:confirm', function (evt) {
     if (!evt.detail.question) return;
     evt.preventDefault();
-    var msgEl = getMsgEl();
-    var modal = getModal();
-    var okBtn = getOkBtn();
-    if (!msgEl || !modal || !okBtn) return;
-    msgEl.textContent = evt.detail.question;
-    modal.classList.add('open');
-    okBtn.onclick = function () { close(); evt.detail.issueRequest(true); };
+    drekConfirm(evt.detail.question, function () { evt.detail.issueRequest(true); });
   });
 })();
 `;
+
+/** Consistent "← Back to X" link. Replaces the per-page hand-styled anchors
+ *  that drifted between 13px/14px and ink-3/muted. */
+export const BackLink: FC<{ href: string; label: string }> = ({ href, label }) => (
+  <a href={href} class="back-link">← {label}</a>
+);
 
 export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
   return (
@@ -531,12 +561,3 @@ export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
     </html>
   );
 };
-
-export function renderPage(props: LayoutProps): string {
-  // hono/jsx returns a string when stringified, so we can wrap directly.
-  // We embed in a full HTML doctype.
-  // The returned JSX is already a tree; hono renders it on c.html() — but
-  // for the route handler ergonomics we also expose this helper.
-  // (Actually unused for now; routes call c.html(<Layout>...) directly.)
-  return `<!doctype html>${Layout(props) as unknown as string}`;
-}

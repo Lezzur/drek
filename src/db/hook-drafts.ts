@@ -6,6 +6,7 @@ import {
   type HookDraft,
   type HookDraftCreate,
 } from './schemas.js';
+import { deleteAllMatching } from './batch-utils.js';
 
 /**
  * HookDraft CRUD — subcollection under each Plan (plans/{planId}/hook_drafts).
@@ -89,14 +90,35 @@ export async function setSelectedHookDraft(
   await batch.commit();
 }
 
+/**
+ * Flip the selection flags AND apply the plan update in a single atomic batch,
+ * so the hook subcollection and `plan.selectedHookVariantId`/status can never
+ * desync on a mid-operation failure. `planUpdate` is written onto the plan doc
+ * verbatim (the caller is responsible for having validated any status
+ * transition first). Returns nothing; throws if the target hook is missing.
+ */
+export async function setSelectedHookDraftWithPlanUpdate(
+  planId: string,
+  hookId: string,
+  planUpdate: Record<string, unknown>,
+  db: Firestore = getDb(),
+): Promise<void> {
+  const all = await hooksCol(db, planId).get();
+  if (!all.docs.some((d) => d.id === hookId)) {
+    throw new Error(`HookDraft ${hookId} not found under plan ${planId}`);
+  }
+  const batch = db.batch();
+  for (const d of all.docs) {
+    batch.update(d.ref, { selected: d.id === hookId });
+  }
+  batch.update(db.collection(PLANS).doc(planId), planUpdate);
+  await batch.commit();
+}
+
 export async function deleteAllHookDraftsForPlan(
   planId: string,
   db: Firestore = getDb(),
 ): Promise<number> {
-  const snap = await hooksCol(db, planId).limit(500).get();
-  if (snap.empty) return 0;
-  const batch = db.batch();
-  for (const d of snap.docs) batch.delete(d.ref);
-  await batch.commit();
-  return snap.size;
+  // Drained in chunks so >500 drafts are fully removed (no silent orphans).
+  return deleteAllMatching(hooksCol(db, planId), db);
 }

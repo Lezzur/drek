@@ -144,7 +144,7 @@ app.patch('/deliverables/:deliverableId/publish', async (c) => {
     }
   } catch (err) {
     logger.error({ deliverableId: id, err: (err as Error).message }, 'publish patch failed');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 
   c.header('HX-Redirect', `/deliverables/${id}/publish`);
@@ -194,7 +194,7 @@ app.post('/deliverables/:deliverableId/publish', async (c) => {
       );
     }
     logger.error({ deliverableId: id, err: (err as Error).message }, 'publish deliverable failed');
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 
@@ -221,7 +221,7 @@ app.post('/deliverables/:deliverableId/generate-publish-metadata', async (c) => 
       { deliverableId: id, err: (err as Error).message },
       'generate-publish-metadata failed',
     );
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message } }, 500);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
   }
 });
 

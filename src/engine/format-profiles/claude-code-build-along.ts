@@ -10,7 +10,7 @@ import type { FormatProfile } from './types.js';
  */
 export const claude_code_build_along: FormatProfile = {
   id: 'claude_code_build_along',
-  displayName: 'Claude Code Build-Along',
+  displayName: 'Build-Along',
   description:
     'Faceless, screen-recorded build of a real client brief using Claude Code. Conversation-angle: the dialogue with Claude IS the show. Implements "The Gauntlet" structure from the channel master doc.',
   sceneRange: [5, 7],

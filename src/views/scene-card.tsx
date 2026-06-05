@@ -117,7 +117,7 @@ export const SceneCard: FC<SceneCardProps> = ({
       <div class="scene-col-left">
         <div class="scene-num">#{scene.order}</div>
         <button
-          class="btn small secondary"
+          class="btn scene-move secondary"
           type="button"
           disabled={isFirst}
           hx-post={`/plans/${planId}/scenes/${scene.id}/move-up`}
@@ -128,7 +128,7 @@ export const SceneCard: FC<SceneCardProps> = ({
           ▲
         </button>
         <button
-          class="btn small secondary"
+          class="btn scene-move secondary"
           type="button"
           disabled={isLast}
           hx-post={`/plans/${planId}/scenes/${scene.id}/move-down`}

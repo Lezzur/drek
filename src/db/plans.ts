@@ -10,6 +10,7 @@ import {
   type PlanType,
   isAllowedPlanTransition,
 } from './schemas.js';
+import { deleteAllMatching } from './batch-utils.js';
 
 const COLLECTION = 'plans';
 
@@ -154,13 +155,9 @@ export async function deletePlan(id: string, db: Firestore = getDb()): Promise<b
   const snap = await ref.get();
   if (!snap.exists) return false;
   // Cascade: delete all scenes in the subcollection. Firestore doesn't do
-  // this for us — orphaned subdocs are a real footgun.
-  const scenesSnap = await ref.collection('scenes').limit(500).get();
-  if (!scenesSnap.empty) {
-    const batch = db.batch();
-    for (const d of scenesSnap.docs) batch.delete(d.ref);
-    await batch.commit();
-  }
+  // this for us — orphaned subdocs are a real footgun. Drained in chunks so
+  // a plan with >500 scenes is fully cleared, not silently truncated.
+  await deleteAllMatching(ref.collection('scenes'), db);
   await ref.delete();
   return true;
 }

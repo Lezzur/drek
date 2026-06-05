@@ -718,7 +718,9 @@ app.post('/intake/:briefId/stage', async (c) => {
   let body: Record<string, string>;
   const contentType = c.req.header('content-type') ?? '';
   if (contentType.includes('application/json')) {
-    body = (await c.req.json()) as Record<string, string>;
+    // Tolerate a malformed JSON body — schema validation below turns {} into
+    // a clean 400 rather than letting the parse throw a 500.
+    body = (await c.req.json().catch(() => ({}))) as Record<string, string>;
   } else {
     const form = await c.req.formData();
     body = Object.fromEntries(form) as Record<string, string>;
@@ -763,7 +765,7 @@ app.post('/intake/:briefId/promote', async (c) => {
   let rawBody: Record<string, string>;
   const contentType = c.req.header('content-type') ?? '';
   if (contentType.includes('application/json')) {
-    rawBody = (await c.req.json()) as Record<string, string>;
+    rawBody = (await c.req.json().catch(() => ({}))) as Record<string, string>;
   } else {
     const form = await c.req.formData();
     rawBody = Object.fromEntries(form) as Record<string, string>;
@@ -841,7 +843,7 @@ app.patch('/intake/:briefId', async (c) => {
   let body: Record<string, unknown>;
   const contentType = c.req.header('content-type') ?? '';
   if (contentType.includes('application/json')) {
-    body = (await c.req.json()) as Record<string, unknown>;
+    body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   } else {
     const form = await c.req.formData();
     body = Object.fromEntries(form) as Record<string, unknown>;

@@ -1,5 +1,5 @@
 import type { FC } from 'hono/jsx';
-import { Layout, type LayoutProps } from './layout.js';
+import { Layout, BackLink, type LayoutProps } from './layout.js';
 import type {
   Plan,
   Deliverable,
@@ -149,9 +149,7 @@ export const DeliverableDetailView: FC<DeliverableDetailViewProps> = ({
   return (
     <Layout title={`${deliverable.title} · ${plan.title}`} flash={flash}>
       <div style="margin-bottom:16px;">
-        <a href={`/plans/${plan.id}/deliverables`} class="muted" style="font-size:14px;">
-          ← Back to deliverables
-        </a>
+        <BackLink href={`/plans/${plan.id}/deliverables`} label="Back to deliverables" />
       </div>
       <div class="card" style="margin-bottom:16px;">
         <h1 style="margin:0 0 6px;font-size:22px;">{deliverable.title}</h1>

@@ -1,11 +1,11 @@
 import type { FormatProfile } from './types.js';
 import { FormatProfileNotFoundError } from './types.js';
 import { claude_code_build_along } from './claude-code-build-along.js';
+import { tutorial } from './tutorial.js';
 
-// Phase 3 will fill in the remaining 6 profiles (tutorial, case_study,
-// comparison, essay_opinion, listicle, reaction_review). For Phase 1 only
-// the default profile is registered so the pipeline + plan-creation flows
-// have something concrete to bind to.
+// Phase 3 originally planned 6 additional profiles (tutorial, case_study,
+// comparison, essay_opinion, listicle, reaction_review). `tutorial` is now
+// authored at depth; the remaining 5 still need their own files.
 
 /**
  * Registry of all available format profiles, keyed by id. Marked Readonly so
@@ -14,6 +14,7 @@ import { claude_code_build_along } from './claude-code-build-along.js';
  */
 export const FORMAT_PROFILES: Readonly<Record<string, FormatProfile>> = Object.freeze({
   [claude_code_build_along.id]: claude_code_build_along,
+  [tutorial.id]: tutorial,
 });
 
 /** Default format profile id for new `youtube_advanced` plans. */

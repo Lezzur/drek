@@ -1,5 +1,5 @@
 import type { FC } from 'hono/jsx';
-import { Layout, type LayoutProps } from './layout.js';
+import { Layout, BackLink, type LayoutProps } from './layout.js';
 import type {
   Plan,
   Deliverable,
@@ -336,9 +336,7 @@ export const PublishMetadataView: FC<PublishMetadataViewProps> = ({
   return (
     <Layout title={`Publish · ${deliverable.title}`} flash={flash}>
       <div style="margin-bottom:16px;">
-        <a href={`/plans/${plan.id}`} class="muted" style="font-size:14px;">
-          ← Back to plan
-        </a>
+        <BackLink href={`/plans/${plan.id}`} label="Back to plan" />
       </div>
       <div class="card" style="margin-bottom:16px;">
         <h1 style="margin:0 0 6px;font-size:22px;">Publish · {deliverable.title}</h1>

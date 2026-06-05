@@ -46,20 +46,11 @@ function scenesCollection(db: Firestore, planId: string) {
   return db.collection(PLANS).doc(planId).collection(SCENES);
 }
 
-/** Create a scene under the given plan. When `order` is omitted, append to
- *  the end (existing-count + 1). */
-export async function createScene(
-  planId: string,
-  input: SceneCreate,
-  db: Firestore = getDb(),
-): Promise<Scene> {
-  const id = makeId('scene');
-  let order = input.order;
-  if (order === undefined) {
-    const existing = await scenesCollection(db, planId).count().get();
-    order = existing.data().count + 1;
-  }
-  const doc = {
+/** Map a SceneCreate input to its persisted document shape at a given order.
+ *  Shared by createScene and replaceAllScenes so the field defaults stay in
+ *  one place. */
+function buildSceneDoc(input: SceneCreate, order: number): Record<string, unknown> {
+  return {
     order,
     title: input.title,
     description: input.description ?? '',
@@ -80,8 +71,55 @@ export async function createScene(
     onScreenTextOverlays: input.onScreenTextOverlays ?? [],
     cutPoints: input.cutPoints ?? [],
   };
+}
+
+/** Create a scene under the given plan. When `order` is omitted, append to
+ *  the end (existing-count + 1). */
+export async function createScene(
+  planId: string,
+  input: SceneCreate,
+  db: Firestore = getDb(),
+): Promise<Scene> {
+  const id = makeId('scene');
+  let order = input.order;
+  if (order === undefined) {
+    const existing = await scenesCollection(db, planId).count().get();
+    order = existing.data().count + 1;
+  }
+  const doc = buildSceneDoc(input, order);
   await scenesCollection(db, planId).doc(id).set(doc);
   return docToScene(planId, id, doc);
+}
+
+/**
+ * Atomically replace ALL scenes for a plan in a single batched commit: every
+ * existing scene is deleted and the new set written together. Either the whole
+ * swap lands or none of it does — there is no window where a crash or Firestore
+ * error leaves the plan with zero or partially-written scenes (the failure mode
+ * of the old delete-loop-then-create-loop). `order` is assigned positionally
+ * (1-based) from the input array. Scene counts are bounded small (format
+ * profiles cap at ~20), so the 500-op batch limit is never a concern here.
+ */
+export async function replaceAllScenes(
+  planId: string,
+  inputs: SceneCreate[],
+  db: Firestore = getDb(),
+): Promise<Scene[]> {
+  const col = scenesCollection(db, planId);
+  const existing = await col.get();
+  const batch = db.batch();
+  for (const d of existing.docs) {
+    batch.delete(d.ref);
+  }
+  const created: Scene[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const id = makeId('scene');
+    const doc = buildSceneDoc(inputs[i]!, i + 1);
+    batch.set(col.doc(id), doc);
+    created.push(docToScene(planId, id, doc));
+  }
+  await batch.commit();
+  return created;
 }
 
 export async function getScene(
@@ -122,6 +160,34 @@ export async function patchScene(
   await ref.update(update);
   const refreshed = await ref.get();
   return docToScene(planId, refreshed.id, refreshed.data() as Record<string, unknown>);
+}
+
+/**
+ * Apply patches to multiple scenes in a single atomic batch. Used by the
+ * script-writing step so all scenes get their scripts in one commit — no
+ * partial-write window where some scenes have new scripts and others old.
+ * Undefined fields are skipped per scene.
+ */
+export async function patchScenesBatch(
+  planId: string,
+  updates: Array<{ id: string; patch: ScenePatch }>,
+  db: Firestore = getDb(),
+): Promise<void> {
+  if (updates.length === 0) return;
+  const col = scenesCollection(db, planId);
+  const batch = db.batch();
+  let ops = 0;
+  for (const { id, patch } of updates) {
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) clean[k] = v;
+    }
+    if (Object.keys(clean).length > 0) {
+      batch.update(col.doc(id), clean);
+      ops++;
+    }
+  }
+  if (ops > 0) await batch.commit();
 }
 
 export async function deleteScene(

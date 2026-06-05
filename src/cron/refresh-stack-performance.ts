@@ -80,10 +80,19 @@ export async function refreshStackPerformance(
   }
 
   // 1. List ContentCatalog
+  const CATALOG_LIMIT = 1000;
   let catalog: ContentCatalogListEntry[];
   try {
-    const res = await neuro.listContentCatalog({ limit: 200 });
+    const res = await neuro.listContentCatalog({ limit: CATALOG_LIMIT });
     catalog = res.profiles;
+    // The client has no cursor, so this is a single capped page. Warn loudly
+    // if we hit the cap — beyond it, per-stack averages silently drop videos.
+    if (catalog.length >= CATALOG_LIMIT) {
+      logger.warn(
+        { step: STEP_NAME, limit: CATALOG_LIMIT },
+        'refresh-stack-performance: ContentCatalog hit the page cap — aggregation may exclude older videos until cursor pagination is added',
+      );
+    }
   } catch (err) {
     logger.error(
       { step: STEP_NAME, err: (err as Error).message },

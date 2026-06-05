@@ -1,5 +1,5 @@
 import type { FC } from 'hono/jsx';
-import { Layout, type LayoutProps } from './layout.js';
+import { Layout, BackLink, type LayoutProps } from './layout.js';
 import type { Plan } from '../db/schemas.js';
 import type { ShortCandidate } from '../engine/extract-shorts.js';
 
@@ -148,9 +148,7 @@ export const ShortsCandidateView: FC<ShortsCandidateViewProps> = ({
   return (
     <Layout title={`Shorts · ${plan.title}`} flash={flash}>
       <div style="margin-bottom:16px;">
-        <a href={`/plans/${plan.id}`} class="muted" style="font-size:14px;">
-          ← Back to plan
-        </a>
+        <BackLink href={`/plans/${plan.id}`} label="Back to plan" />
       </div>
       <div class="card" style="margin-bottom:16px;">
         <h1 style="margin:0 0 6px;font-size:22px;">Shorts · {plan.title}</h1>

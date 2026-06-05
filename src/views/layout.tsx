@@ -190,6 +190,8 @@ button.btn { font-family: inherit; }
 .row { display: flex; gap: 8px; align-items: center; }
 .spacer { flex: 1; }
 .muted { color: var(--ink-3); font-size: 14px; }
+.back-link { display: inline-block; font-size: 14px; color: var(--ink-3); text-decoration: none; }
+.back-link:hover { color: var(--ink-2); text-decoration: none; }
 .empty {
   text-align: center;
   padding: 32px 16px;
@@ -199,6 +201,7 @@ button.btn { font-family: inherit; }
   border: 1px dashed var(--border-strong);
   border-radius: 10px;
 }
+.empty.lg { padding: 48px 24px; }
 form.inline { display: block; width: 100%; margin: 0; }
 input[type="text"], input[type="number"], input[type="url"], select {
   padding: 9px 12px;
@@ -477,6 +480,24 @@ const CONFIRM_SCRIPT = `
     var m = getModal();
     if (m) m.classList.remove('open');
   }
+  // Reusable styled confirm. Shows the modal with \`message\`; runs onConfirm()
+  // only if the user clicks Confirm. Both the htmx:confirm handler and custom
+  // scripts (e.g. the intake bulk actions) go through this so every
+  // confirmation looks the same. Falls back to native confirm() if the modal
+  // markup is somehow absent.
+  function drekConfirm(message, onConfirm) {
+    var msgEl = getMsgEl();
+    var modal = getModal();
+    var okBtn = getOkBtn();
+    if (!msgEl || !modal || !okBtn) {
+      if (window.confirm(message) && onConfirm) onConfirm();
+      return;
+    }
+    msgEl.textContent = message;
+    modal.classList.add('open');
+    okBtn.onclick = function () { close(); if (onConfirm) onConfirm(); };
+  }
+  window.drekConfirm = drekConfirm;
   document.addEventListener('DOMContentLoaded', function () {
     var cancelBtn = getCancelBtn();
     var modal = getModal();
@@ -486,16 +507,16 @@ const CONFIRM_SCRIPT = `
   document.addEventListener('htmx:confirm', function (evt) {
     if (!evt.detail.question) return;
     evt.preventDefault();
-    var msgEl = getMsgEl();
-    var modal = getModal();
-    var okBtn = getOkBtn();
-    if (!msgEl || !modal || !okBtn) return;
-    msgEl.textContent = evt.detail.question;
-    modal.classList.add('open');
-    okBtn.onclick = function () { close(); evt.detail.issueRequest(true); };
+    drekConfirm(evt.detail.question, function () { evt.detail.issueRequest(true); });
   });
 })();
 `;
+
+/** Consistent "← Back to X" link. Replaces the per-page hand-styled anchors
+ *  that drifted between 13px/14px and ink-3/muted. */
+export const BackLink: FC<{ href: string; label: string }> = ({ href, label }) => (
+  <a href={href} class="back-link">← {label}</a>
+);
 
 export const Layout: FC<LayoutProps> = ({ title, children, flash }) => {
   return (

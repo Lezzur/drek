@@ -1,5 +1,5 @@
 import type { FC } from 'hono/jsx';
-import { Layout, type LayoutProps } from './layout.js';
+import { Layout, BackLink, type LayoutProps } from './layout.js';
 import type {
   Plan,
   HookDraft,
@@ -76,13 +76,8 @@ export const HookWorkshopView: FC<HookWorkshopViewProps> = ({ plan, hooks, flash
   return (
     <Layout title={`Hooks · ${plan.title}`} flash={flash}>
       <div style="margin-bottom:20px;">
-        <a
-          href={`/plans/${plan.id}`}
-          style="font-size:13px; color:var(--ink-3); text-decoration:none; display:inline-block; margin-bottom:12px;"
-        >
-          ← Back to plan
-        </a>
-        <div style="display:flex; align-items:center; gap:12px;">
+        <BackLink href={`/plans/${plan.id}`} label="Back to plan" />
+        <div style="display:flex; align-items:center; gap:12px; margin-top:12px;">
           <h1 style="margin:0; flex:1;">Hooks · {plan.title}</h1>
           <button
             class="btn secondary"
@@ -195,9 +190,7 @@ export const TitleWorkshopView: FC<TitleWorkshopViewProps> = ({
   return (
     <Layout title={`Titles · ${plan.title}`} flash={flash}>
       <div style="margin-bottom:16px;">
-        <a href={`/plans/${plan.id}`} class="muted" style="font-size:14px;">
-          ← Back to plan
-        </a>
+        <BackLink href={`/plans/${plan.id}`} label="Back to plan" />
       </div>
       <div class="card" style="margin-bottom:16px;">
         <h1 style="margin:0 0 6px;font-size:22px;">Titles · {plan.title}</h1>
@@ -312,9 +305,7 @@ export const ThumbnailWorkshopView: FC<ThumbnailWorkshopViewProps> = ({
   return (
     <Layout title={`Thumbnails · ${plan.title}`} flash={flash}>
       <div style="margin-bottom:16px;">
-        <a href={`/plans/${plan.id}`} class="muted" style="font-size:14px;">
-          ← Back to plan
-        </a>
+        <BackLink href={`/plans/${plan.id}`} label="Back to plan" />
       </div>
       <div class="card" style="margin-bottom:16px;">
         <h1 style="margin:0 0 6px;font-size:22px;">Thumbnails · {plan.title}</h1>

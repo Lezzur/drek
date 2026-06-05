@@ -395,27 +395,41 @@ const BULK_SCRIPT = `
     var confirmMsg = action === 'delete'
       ? 'Delete ' + ids.length + ' brief(s)? This is permanent — the records are removed from Firestore.'
       : 'Retire ' + ids.length + ' brief(s)? They will move out of the active queue.';
-    if (!confirm(confirmMsg)) return;
 
-    btn.disabled = true;
-    var body = new FormData();
-    body.set('action', action);
-    ids.forEach(function (id) { body.append('briefIds', id); });
-    fetch('/intake/bulk-action', { method: 'POST', body: body, headers: { 'hx-request': 'true' } })
-      .then(function (r) {
-        if (r.ok || r.status === 302) {
-          window.location.href = '/intake';
-        } else {
-          return r.json().then(function (j) {
-            alert('Bulk action failed: ' + (j.error && j.error.message ? j.error.message : 'unknown error'));
-            btn.disabled = false;
-          });
-        }
-      })
-      .catch(function (err) {
-        alert('Bulk action failed: ' + err.message);
-        btn.disabled = false;
-      });
+    function showError(msg) {
+      var main = document.querySelector('main');
+      if (!main) { alert(msg); return; }
+      var d = document.createElement('div');
+      d.className = 'flash err';
+      d.textContent = 'Bulk action failed: ' + msg;
+      main.insertBefore(d, main.firstChild);
+      window.scrollTo(0, 0);
+    }
+
+    function run() {
+      btn.disabled = true;
+      var body = new FormData();
+      body.set('action', action);
+      ids.forEach(function (id) { body.append('briefIds', id); });
+      fetch('/intake/bulk-action', { method: 'POST', body: body, headers: { 'hx-request': 'true' } })
+        .then(function (r) {
+          if (r.ok || r.status === 302) {
+            window.location.href = '/intake';
+          } else {
+            return r.json().then(function (j) {
+              showError(j.error && j.error.message ? j.error.message : 'unknown error');
+              btn.disabled = false;
+            });
+          }
+        })
+        .catch(function (err) {
+          showError(err.message);
+          btn.disabled = false;
+        });
+    }
+
+    // Route through the shared styled modal (falls back to native confirm()).
+    (window.drekConfirm || function (m, cb) { if (window.confirm(m)) cb(); })(confirmMsg, run);
   });
 
   refresh();

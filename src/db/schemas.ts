@@ -209,7 +209,6 @@ export const SCENE_INTERFACE_TYPES = [
   'logs',
   'headshot',
 ] as const;
-export type SceneInterfaceType = (typeof SCENE_INTERFACE_TYPES)[number];
 
 /** v2 shot list item — used for both primary shot, B-roll, and supplementary
  *  shot list items (one shape, three lists). */
@@ -219,7 +218,6 @@ export const SHOT_ITEM_SOURCES = [
   'reuse_from_episode',
   'generate_with_tool',
 ] as const;
-export type ShotItemSource = (typeof SHOT_ITEM_SOURCES)[number];
 
 export const brollItemSchema = z.object({
   type: z.enum(SCENE_INTERFACE_TYPES),
@@ -235,7 +233,6 @@ export const ON_SCREEN_TEXT_STYLES = [
   'chapter_marker',
   'footnote',
 ] as const;
-export type OnScreenTextStyle = (typeof ON_SCREEN_TEXT_STYLES)[number];
 
 export const onScreenTextOverlaySchema = z.object({
   textContent: z.string().min(1).max(80),
@@ -511,14 +508,12 @@ export const toolchainEntrySchema = z.object({
   role: z.string().min(1).max(300),
   source: z.enum(['given', 'assumed']),
 });
-export type ToolchainEntry = z.infer<typeof toolchainEntrySchema>;
 
 export const buildStepSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(800),
   estimatedMinutes: z.number().int().min(1).max(240),
 });
-export type BuildStep = z.infer<typeof buildStepSchema>;
 
 /**
  * v2.1.1 M35: build phases. A "phase" is one demoable milestone — one
@@ -625,7 +620,6 @@ export const HOOK_ARCHETYPES = [
   'story_cold_open',
   'demo_first',
 ] as const;
-export type HookArchetype = (typeof HOOK_ARCHETYPES)[number];
 
 export const hookDraftSchema = z.object({
   id: z.string().min(1),
@@ -657,7 +651,6 @@ export const TITLE_ARCHETYPES = [
   'question_format',
   'before_after',
 ] as const;
-export type TitleArchetype = (typeof TITLE_ARCHETYPES)[number];
 
 export const titleConceptSchema = z.object({
   id: z.string().min(1),

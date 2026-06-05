@@ -126,7 +126,7 @@ export const NewBatchBriefForm: FC<NewBatchBriefFormProps> = ({
           ← Intake pipeline
         </a>
       </div>
-      <h2>Add briefs (batch)</h2>
+      <h1>Add briefs (batch)</h1>
       <p class="muted" style="margin-top:-8px; margin-bottom:20px;">
         Paste up to {MAX_ROWS} briefs at once. All briefs persist immediately;
         scoring runs in parallel (~30-45s for 10 briefs). Click any row in
@@ -327,7 +327,7 @@ export const BatchOverviewPage: FC<BatchOverviewPageProps> = ({
       <div class="card" style="margin-bottom:16px;" {...pollAttrs}>
         <div class="row" style="justify-content:space-between; align-items:flex-start; gap:12px;">
           <div>
-            <h2 style="margin:0 0 4px;">Batch · {briefs.length} brief{briefs.length === 1 ? '' : 's'}</h2>
+            <h1 style="margin:0 0 4px;">Batch · {briefs.length} brief{briefs.length === 1 ? '' : 's'}</h1>
             <div class="muted" style="font-size:13px; font-family:ui-monospace,monospace;">
               {batchId}
             </div>

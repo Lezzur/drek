@@ -48,7 +48,7 @@ export const NewBriefForm: FC<NewBriefFormProps> = ({ values, error, flash }) =>
       title="Add brief"
       flash={error ? { type: 'err', message: error } : (flash ?? null)}
     >
-      <h2>Add brief</h2>
+      <h1>Add brief</h1>
       <p class="muted" style="margin-top:-8px; margin-bottom:20px;">
         Paste a job brief from Upwork, Freelancer, or any source. DREK will
         score it for YouTube production potential.

@@ -9,8 +9,14 @@ import {
   patchScene,
   reorderScenes,
 } from '../db/scenes.js';
-import { SceneCard, SceneList } from '../views/scene-card.js';
-import { scenePatchSchema } from '../db/schemas.js';
+import { SceneCard, SceneList, ShotListBlock } from '../views/scene-card.js';
+import {
+  scenePatchSchema,
+  brollItemSchema,
+  primaryShotSchema,
+  SCENE_INTERFACE_TYPES,
+  SHOT_ITEM_SOURCES,
+} from '../db/schemas.js';
 import { estimateSceneSeconds } from '../engine/composition-rules.js';
 
 /**
@@ -163,6 +169,86 @@ app.delete('/plans/:id/scenes/:sceneId', async (c) => {
   if (renumber.length > 0) await reorderScenes(planId, renumber);
   const fresh = await listScenes(planId);
   return c.html(<SceneList planId={planId} scenes={fresh} />);
+});
+
+// ---------------------------------------------------------------------------
+// Shot list inline editing
+// ---------------------------------------------------------------------------
+
+/** PATCH /plans/:id/scenes/:sceneId/shots/primary — update primaryShot type + description. */
+app.patch('/plans/:id/scenes/:sceneId/shots/primary', async (c) => {
+  const planId = c.req.param('id');
+  const sceneId = c.req.param('sceneId');
+  let form: FormData;
+  try { form = await c.req.formData(); } catch { return c.html('', 400); }
+  const raw = Object.fromEntries(form);
+  const parsed = primaryShotSchema.safeParse({
+    type: raw.type,
+    description: raw.description,
+  });
+  if (!parsed.success) return c.html('', 400);
+  const scene = await getScene(planId, sceneId);
+  if (!scene) return c.html('', 404);
+  const updated = await patchScene(planId, sceneId, { primaryShot: parsed.data });
+  if (!updated) return c.html('', 404);
+  return c.html(<ShotListBlock planId={planId} scene={updated} />);
+});
+
+/** POST /plans/:id/scenes/:sceneId/shots/broll — append a b-roll item. */
+app.post('/plans/:id/scenes/:sceneId/shots/broll', async (c) => {
+  const planId = c.req.param('id');
+  const sceneId = c.req.param('sceneId');
+  let form: FormData;
+  try { form = await c.req.formData(); } catch { return c.html('', 400); }
+  const raw = Object.fromEntries(form);
+  const parsed = brollItemSchema.safeParse({
+    type: raw.type,
+    description: raw.description,
+    source: raw.source ?? 'record_during_scene',
+    durationSeconds: Number(raw.durationSeconds) || 10,
+  });
+  if (!parsed.success) return c.html('', 400);
+  const scene = await getScene(planId, sceneId);
+  if (!scene) return c.html('', 404);
+  const updated = await patchScene(planId, sceneId, {
+    brollItems: [...scene.brollItems, parsed.data],
+  });
+  if (!updated) return c.html('', 404);
+  return c.html(<ShotListBlock planId={planId} scene={updated} />);
+});
+
+/** PATCH /plans/:id/scenes/:sceneId/shots/broll/:index — edit b-roll item description. */
+app.patch('/plans/:id/scenes/:sceneId/shots/broll/:index', async (c) => {
+  const planId = c.req.param('id');
+  const sceneId = c.req.param('sceneId');
+  const idx = parseInt(c.req.param('index'), 10);
+  let form: FormData;
+  try { form = await c.req.formData(); } catch { return c.html('', 400); }
+  const raw = Object.fromEntries(form);
+  const scene = await getScene(planId, sceneId);
+  if (!scene || idx < 0 || idx >= scene.brollItems.length) return c.html('', 404);
+  const updated_items = scene.brollItems.map((b, i) =>
+    i === idx ? { ...b, description: String(raw.description ?? b.description) } : b
+  );
+  const validated = z.array(brollItemSchema).safeParse(updated_items);
+  if (!validated.success) return c.html('', 400);
+  const updated = await patchScene(planId, sceneId, { brollItems: validated.data });
+  if (!updated) return c.html('', 404);
+  return c.html(<ShotListBlock planId={planId} scene={updated} />);
+});
+
+/** DELETE /plans/:id/scenes/:sceneId/shots/broll/:index — remove a b-roll item. */
+app.delete('/plans/:id/scenes/:sceneId/shots/broll/:index', async (c) => {
+  const planId = c.req.param('id');
+  const sceneId = c.req.param('sceneId');
+  const idx = parseInt(c.req.param('index'), 10);
+  const scene = await getScene(planId, sceneId);
+  if (!scene || idx < 0 || idx >= scene.brollItems.length) return c.html('', 404);
+  const updated = await patchScene(planId, sceneId, {
+    brollItems: scene.brollItems.filter((_, i) => i !== idx),
+  });
+  if (!updated) return c.html('', 404);
+  return c.html(<ShotListBlock planId={planId} scene={updated} />);
 });
 
 /** POST /plans/:id/scenes — append a blank scene at the end. */

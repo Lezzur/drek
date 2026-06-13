@@ -6,6 +6,7 @@ import { getDb } from './db/firestore.js';
 import { startScheduler } from './lib/scheduler.js';
 import { refreshModelCatalog } from './models/catalog.js';
 import { makePollingJob } from './polling/service.js';
+import { recoverAndBackfill } from './engine/auto-pipeline.js';
 import { initializeWriteQueue } from './neurocore/write-queue.js';
 import { refreshStackPerformance } from './cron/refresh-stack-performance.js';
 import { dailyAt } from './lib/scheduler.js';
@@ -81,6 +82,15 @@ const server = serve(
       // Kick off model-config cache boot fetch (background, non-blocking).
       // DREK will fall back to env defaults if Neurocore is unreachable at boot.
       initModelConfigCache();
+
+      // Auto-pipeline boot pass ~10s after start (lets Firestore warm up):
+      // re-enqueue plans a crash left queued/running, and backfill fresh
+      // awaiting_review listings that never ran. Best-effort.
+      setTimeout(() => {
+        void recoverAndBackfill().catch((err) =>
+          logger.warn({ err: (err as Error).message }, 'auto-pipeline boot pass failed'),
+        );
+      }, 10_000);
 
       // Recover the Neurocore write queue from disk (if WORKSPACE_ROOT is set)
       // and start the 30s drain worker. Best-effort: a recovery failure

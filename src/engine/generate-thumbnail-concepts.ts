@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
+import { defaultLlmTimeoutMs } from './llm-timeout.js';
 import { getPlan, patchPlan } from '../db/plans.js';
 import {
   getDeliverable,
@@ -37,7 +38,6 @@ import { type ThumbnailConcept } from '../db/schemas.js';
  */
 
 const STEP_NAME = 'generate-thumbnail-concepts';
-const DEFAULT_TIMEOUT_MS = 20_000;
 const MIN_CONCEPTS = 3;
 const MAX_CONCEPTS = 5;
 
@@ -161,7 +161,7 @@ export async function generateThumbnailConcepts(
 ): Promise<GenerateThumbnailConceptsResult> {
   const t0 = Date.now();
   const provider = opts.provider ?? (await getLLMProvider());
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = defaultLlmTimeoutMs(opts.timeoutMs);
 
   // ---- Load deliverable + parent plan -----------------------------------
 

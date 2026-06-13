@@ -26,6 +26,23 @@ function tsToDate(v: unknown): Date | null {
   return typeof maybe.toDate === 'function' ? maybe.toDate() : null;
 }
 
+/** Rehydrate the nested researchContext: its `synthesizedAt` is stored as a
+ *  Firestore Timestamp and must become a Date before planSchema validates it.
+ *  Returns null when absent (v1 plans / pre-research youtube_advanced). */
+function reviveResearchContext(v: unknown): Plan['researchContext'] {
+  if (!v || typeof v !== 'object') return null;
+  const rc = v as Record<string, unknown>;
+  return {
+    synthesis: String(rc.synthesis ?? ''),
+    keyInsights: Array.isArray(rc.keyInsights) ? (rc.keyInsights as string[]) : [],
+    competitorGaps: Array.isArray(rc.competitorGaps) ? (rc.competitorGaps as string[]) : [],
+    sources: Array.isArray(rc.sources)
+      ? (rc.sources as { url: string; title: string; relevance: string }[])
+      : [],
+    synthesizedAt: tsToDate(rc.synthesizedAt) ?? new Date(0),
+  };
+}
+
 function docToPlan(id: string, data: Record<string, unknown>): Plan {
   return planSchema.parse({
     id,
@@ -50,6 +67,9 @@ function docToPlan(id: string, data: Record<string, unknown>): Plan {
     selectedHookVariantId: (data.selectedHookVariantId as string | null) ?? null,
     selectedTitleVariantId: (data.selectedTitleVariantId as string | null) ?? null,
     selectedThumbnailConceptId: (data.selectedThumbnailConceptId as string | null) ?? null,
+    pipelineState: (data.pipelineState as string | undefined) ?? 'idle',
+    pipelineError: (data.pipelineError as string | null) ?? null,
+    researchContext: reviveResearchContext(data.researchContext),
   });
 }
 
@@ -78,6 +98,8 @@ export async function createPlan(input: PlanCreate, db: Firestore = getDb()): Pr
     selectedHookVariantId: null,
     selectedTitleVariantId: null,
     selectedThumbnailConceptId: null,
+    pipelineState: 'idle',
+    pipelineError: null,
   };
   await db.collection(COLLECTION).doc(id).set(doc);
   return docToPlan(id, doc);

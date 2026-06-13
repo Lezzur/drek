@@ -272,6 +272,9 @@ async function exportSingleDeliverable(
     selectedHookVariantId: null,
     selectedTitleVariantId: null,
     selectedThumbnailConceptId: null,
+    pipelineState: 'idle' as const,
+    pipelineError: null,
+    researchContext: null,
   };
 
   const htmlBody = String(

@@ -27,71 +27,74 @@ export interface ShootInstructionsProps {
 const STYLES = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 18px;
   line-height: 1.6;
-  color: #eae8e1;
-  background: #111110;
+  color: #e9ecf2;
+  background:
+    radial-gradient(1100px 420px at 50% -180px, rgba(255, 178, 36, 0.055), transparent 70%),
+    #0b0d11;
 }
 main { max-width: 880px; margin: 0 auto; padding: 40px 32px; }
-h1 { font-size: 36px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 8px; }
+h1 { font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif; font-size: 36px; font-weight: 700; letter-spacing: -0.015em; margin-bottom: 8px; }
 .bar {
-  background: #0c0c0b;
-  color: #eae8e1;
+  background: rgba(10, 12, 16, 0.82);
+  color: #e9ecf2;
   padding: 12px 24px;
   display: flex;
   align-items: center;
   gap: 12px;
+  border-bottom: 1px solid #1b212c;
 }
 .bar a, .bar button {
   background: transparent;
-  color: #eae8e1;
-  border: 1px solid rgba(255,255,255,0.25);
+  color: #e9ecf2;
+  border: 1px solid #313a4b;
   padding: 7px 14px;
-  border-radius: 6px;
+  border-radius: 7px;
   font-size: 14px;
   cursor: pointer;
   text-decoration: none;
   font-family: inherit;
 }
-.bar a:hover, .bar button:hover { background: rgba(255,255,255,0.08); text-decoration: none; }
+.bar a:hover, .bar button:hover { background: #1c222d; text-decoration: none; }
 .bar .spacer { flex: 1; }
 .meta {
   display: grid;
   grid-template-columns: 120px 1fr;
   gap: 6px 16px;
   font-size: 15px;
-  color: #c0beb7;
+  color: #b4bcc9;
   margin-bottom: 36px;
   padding: 16px 20px;
-  background: #1c1c1a;
-  border: 1px solid #2a2a27;
-  border-radius: 10px;
+  background: #131720;
+  border: 1px solid #232a37;
+  border-radius: 12px;
 }
-.meta-label { color: #7a7872; font-size: 13px; font-weight: 500; }
+.meta-label { color: #7b8494; font-size: 13px; font-weight: 500; }
 .scene {
   margin-bottom: 40px;
   page-break-inside: avoid;
 }
 .scene-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 16px; }
-.scene-num { font-size: 48px; font-weight: 700; color: #6ba3e0; line-height: 1; font-variant-numeric: tabular-nums; }
-.scene-title { font-size: 24px; font-weight: 600; flex: 1; color: #eae8e1; }
-.scene-dur { color: #7a7872; font-size: 14px; }
+.scene-num { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 44px; font-weight: 700; color: #ffb224; line-height: 1; font-variant-numeric: tabular-nums; }
+.scene-title { font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif; font-size: 24px; font-weight: 600; flex: 1; color: #e9ecf2; }
+.scene-dur { color: #7b8494; font-size: 14px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .framing {
-  background: #152035;
-  border-left: 4px solid #6ba3e0;
+  background: #16233a;
+  border-left: 4px solid #82aaf5;
   padding: 12px 16px;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 8px 8px 0;
   font-size: 15px;
-  color: #c0beb7;
+  color: #b4bcc9;
   margin-bottom: 20px;
 }
 .framing-label {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #7a7872;
+  color: #7b8494;
   display: block;
   margin-bottom: 6px;
 }
@@ -100,49 +103,49 @@ h1 { font-size: 36px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 
   line-height: 1.7;
   white-space: pre-wrap;
   max-width: 65ch;
-  color: #eae8e1;
+  color: #e9ecf2;
   margin-bottom: 16px;
 }
 .pacing {
-  background: #241908;
-  border-left: 4px solid #c89040;
+  background: #2b2008;
+  border-left: 4px solid #e7a93b;
   padding: 10px 14px;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 8px 8px 0;
   font-size: 14px;
-  color: #c89040;
+  color: #e7a93b;
   margin-top: 14px;
 }
 .transition {
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px dashed #363632;
+  border-top: 1px dashed #313a4b;
   font-size: 13px;
-  color: #7a7872;
+  color: #7b8494;
   font-style: italic;
 }
 .stale-banner {
-  background: #241908;
-  border: 1px solid #4a3010;
-  color: #c89040;
+  background: #2b2008;
+  border: 1px solid #4d3a12;
+  color: #e7a93b;
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: 9px;
   margin-bottom: 20px;
 }
 .runtime-summary {
-  background: #1c1c1a;
-  border: 1px solid #2a2a27;
-  border-radius: 10px;
+  background: #131720;
+  border: 1px solid #232a37;
+  border-radius: 12px;
   padding: 20px 24px;
   margin-top: 40px;
   font-size: 16px;
 }
-.runtime-summary h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #7a7872; margin-bottom: 12px; }
+.runtime-summary h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #7b8494; margin-bottom: 12px; }
 .runtime-list { list-style: none; margin-top: 8px; }
-.runtime-list li { font-size: 14px; color: #7a7872; padding: 4px 0; font-variant-numeric: tabular-nums; }
-.runtime-total { font-size: 17px; font-weight: 600; margin-bottom: 4px; color: #eae8e1; }
+.runtime-list li { font-size: 14px; color: #7b8494; padding: 4px 0; font-variant-numeric: tabular-nums; }
+.runtime-total { font-size: 17px; font-weight: 600; margin-bottom: 4px; color: #e9ecf2; }
 @media print {
   .bar, .stale-banner { display: none !important; }
-  body { background: #111110; font-size: 16px; }
+  body { background: #0b0d11; font-size: 16px; }
   main { padding: 0; }
   .scene { page-break-inside: avoid; }
 }
@@ -164,6 +167,12 @@ export const ShootInstructionsPage: FC<ShootInstructionsProps> = ({
       <head>
         <meta charset="utf-8" />
         <title>Shoot instructions · {plan.title}</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap"
+        />
         <style dangerouslySetInnerHTML={{ __html: STYLES }} />
       </head>
       <body>

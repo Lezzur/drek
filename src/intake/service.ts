@@ -52,7 +52,7 @@ import { IntakeError } from './errors.js';
  *   - Audience profile id resolves via the Neurocore client
  */
 
-export interface CreateBriefInput extends PipelineBriefCreate {}
+export type CreateBriefInput = PipelineBriefCreate;
 
 export async function createBrief(
   input: CreateBriefInput,
@@ -297,6 +297,151 @@ export async function promoteBriefToPlan(
     logger.warn(
       { briefId, planId, err: (err as Error).message },
       'intake.promote: workspace creation deferred (will retry on plan detail)',
+    );
+  }
+
+  return { planId, deliverableId };
+}
+
+// ---------------------------------------------------------------------------
+// Direct-create — no brief required
+// ---------------------------------------------------------------------------
+
+export interface CreateYoutubeAdvancedPlanDirectOptions {
+  title: string;
+  formatProfileId: string;
+  audienceProfileId: string;
+  /** Optional override; defaults to midpoint of formatProfile.runtimeRange. */
+  targetRuntimeSeconds?: number;
+  userConstraints?: string | null;
+  db?: Firestore;
+}
+
+export interface CreateYoutubeAdvancedPlanDirectResult {
+  planId: string;
+  deliverableId: string;
+}
+
+/**
+ * Create a `youtube_advanced` plan directly (no pipeline brief required).
+ * Atomic Firestore batch: plan + long_form Deliverable in one write.
+ * Starts at `requirements_reviewed` — no listing to analyze, same as youtube_lite.
+ */
+export async function createYoutubeAdvancedPlanDirect(
+  opts: CreateYoutubeAdvancedPlanDirectOptions,
+): Promise<CreateYoutubeAdvancedPlanDirectResult> {
+  const db = opts.db ?? getDb();
+
+  // Validate format profile (sync).
+  let formatProfile;
+  try {
+    formatProfile = getFormatProfile(opts.formatProfileId);
+  } catch (err) {
+    if (err instanceof FormatProfileNotFoundError) {
+      throw new IntakeError(
+        'UNKNOWN_FORMAT_PROFILE',
+        `unknown format profile: ${opts.formatProfileId}`,
+        { detail: { formatProfileId: opts.formatProfileId } },
+      );
+    }
+    throw err;
+  }
+
+  // Validate audience profile (Neurocore round-trip).
+  try {
+    await getAudienceProfileClient().get(opts.audienceProfileId);
+  } catch (err) {
+    if (err instanceof AudienceProfileNotFoundError) {
+      throw new IntakeError(
+        'UNKNOWN_AUDIENCE_PROFILE',
+        `unknown audience profile: ${opts.audienceProfileId}`,
+        { detail: { audienceProfileId: opts.audienceProfileId } },
+      );
+    }
+    throw err;
+  }
+
+  const now = new Date();
+  const planId = makeId('plan');
+  const [minRuntime, maxRuntime] = formatProfile.runtimeRange;
+  const targetRuntimeSeconds =
+    opts.targetRuntimeSeconds ?? Math.round((minRuntime + maxRuntime) / 2);
+
+  const planDoc = {
+    type: 'youtube_advanced' as const,
+    status: 'requirements_reviewed' as const,
+    title: opts.title,
+    sourceListingId: null,
+    sourceListingText: null,
+    requirements: [],
+    matchedProjects: [],
+    targetRuntimeSeconds,
+    estimatedRuntimeSeconds: 0,
+    userConstraints: opts.userConstraints ?? null,
+    createdAt: now,
+    updatedAt: now,
+    exportedAt: null,
+    formatProfileId: opts.formatProfileId,
+    pipelineBriefId: null,
+    workspacePath: null,
+    selectedHookVariantId: null,
+    selectedTitleVariantId: null,
+    selectedThumbnailConceptId: null,
+  };
+
+  const deliverableId = makeId('del');
+  const deliverableDoc = {
+    planId,
+    kind: 'long_form' as const,
+    audienceProfileId: opts.audienceProfileId,
+    title: opts.title,
+    status: 'draft' as const,
+    scriptOverrideSceneIds: null,
+    customScripts: null,
+    selectedTitleVariantId: null,
+    selectedThumbnailConceptId: null,
+    publishMetadataId: null,
+    youtubeUrl: null,
+    publishedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const batch = db.batch();
+  batch.set(db.collection('plans').doc(planId), planDoc);
+  batch.set(db.collection('deliverables').doc(deliverableId), deliverableDoc);
+
+  try {
+    await batch.commit();
+  } catch (err) {
+    logger.error(
+      { err, planId, deliverableId },
+      'intake.createDirect: batch commit failed',
+    );
+    throw new IntakeError(
+      'PERSIST_FAILED',
+      `Firestore batch commit failed: ${(err as Error).message}`,
+      { detail: { planId, deliverableId } },
+    );
+  }
+
+  logger.info(
+    { planId, deliverableId, formatProfileId: opts.formatProfileId, audienceProfileId: opts.audienceProfileId },
+    'intake.createDirect: youtube_advanced plan created',
+  );
+
+  // Best-effort workspace creation — non-fatal if WORKSPACE_ROOT is offline.
+  try {
+    const { createPlanWorkspaceForPlan } = await import('../workspace/service.js');
+    const { getPlan } = await import('../db/plans.js');
+    const freshPlan = await getPlan(planId, db);
+    if (freshPlan) {
+      await createPlanWorkspaceForPlan(freshPlan);
+    }
+  } catch (err) {
+    logger.warn(
+      { planId, err: (err as Error).message },
+      'intake.createDirect: workspace creation deferred (will retry on plan detail)',
     );
   }
 

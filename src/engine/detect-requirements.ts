@@ -2,6 +2,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
+import { defaultLlmTimeoutMs } from './llm-timeout.js';
 import { getPlan, patchPlan } from '../db/plans.js';
 import { getPipelineBrief } from '../db/pipeline-briefs.js';
 import { findLongFormDeliverable, DeliverableNotFoundError } from '../db/deliverables.js';
@@ -100,7 +101,7 @@ interface DetectRequirementsOptions {
   provider?: LLMProvider;
   /** Override the Firestore instance. Used by tests with an in-memory fake. */
   db?: Firestore;
-  /** Override the per-call LLM timeout. Defaults to 30s. */
+  /** Override the per-call LLM timeout. Defaults to env LLM_TIMEOUT_MS. */
   timeoutMs?: number;
 }
 
@@ -127,8 +128,7 @@ export async function detectRequirements(
 ): Promise<DetectRequirementsResult> {
   const t0 = Date.now();
   const provider = opts.provider ?? await getLLMProvider();
-  const DEFAULT_TIMEOUT_MS = 30_000;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = defaultLlmTimeoutMs(opts.timeoutMs);
 
   // ---- Load plan -------------------------------------------------------
   const plan = await getPlan(planId, opts.db);

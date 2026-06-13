@@ -60,10 +60,10 @@ describe('NeurocoreClient — read methods', () => {
     );
   });
 
-  it('getProjectContext uses videoPlanYoutube for youtube mode', async () => {
+  it('getProjectContext uses videoPlanYoutube for youtube_lite mode', async () => {
     mockSharedClient.composeContext.mockResolvedValueOnce({ systemBlock: 'x', metadata: {} });
     const client = new NeurocoreClient();
-    await client.getProjectContext({ planMode: 'youtube' });
+    await client.getProjectContext({ planMode: 'youtube_lite' });
     expect(mockSharedClient.composeContext).toHaveBeenCalledWith(
       expect.objectContaining({ taskType: 'videoPlanYoutube' }),
     );
@@ -104,21 +104,43 @@ describe('NeurocoreClient — signal emit methods', () => {
   it('sendApprovedScript emits script.approved with deterministic key', async () => {
     mockSharedClient.emitSignal.mockResolvedValueOnce({ signalId: 's1', duplicate: false, queued: true });
     const client = new NeurocoreClient();
-    await client.sendApprovedScript({ planId: 'p1' });
+    const payload = {
+      planId: 'p1',
+      planMode: 'cover_letter' as const,
+      scenes: [{ script: 'final', scriptDraft: 'draft', wasEdited: true }],
+    };
+    await client.sendApprovedScript(payload);
     expect(mockSharedClient.emitSignal).toHaveBeenCalledWith({
       type: 'script.approved',
-      payload: { planId: 'p1' },
+      payload,
       idempotencyKey: 'drek-script-approved-p1',
     });
   });
+
+  const buildPlanShape = {
+    goal: 'g',
+    finalProduct: 'fp',
+    toolchain: [{ name: 'tsx', role: 'runner', source: 'given' as const }],
+    buildSteps: [{ title: 't', description: 'd', estimatedMinutes: 10 }],
+    shotHints: ['terminal'],
+    pinnedTechStack: { primary: 'node', supporting: [], rationale: 'r' },
+  };
 
   it('sendBuildPlanEdited keys on briefId+editedAt', async () => {
     mockSharedClient.emitSignal.mockResolvedValueOnce({ signalId: 's', duplicate: false, queued: true });
     const client = new NeurocoreClient();
     await client.sendBuildPlanEdited({
-      spoke: 'drek',
       briefId: 'b1',
-      fieldsChanged: ['title'],
+      originalPlan: buildPlanShape,
+      editedPlan: buildPlanShape,
+      changed: {
+        goal: false,
+        finalProduct: false,
+        pinnedTechStack: false,
+        toolchain: { added: [], removed: [], roleEdits: 0 },
+        buildSteps: { added: 0, removed: 0, edited: 1, totalMinutesDelta: 0 },
+        shotHints: { added: 0, removed: 0 },
+      },
       editedAt: '2026-05-30T00:00:00.000Z',
     });
     expect(mockSharedClient.emitSignal).toHaveBeenCalledWith(
@@ -133,10 +155,10 @@ describe('NeurocoreClient — signal emit methods', () => {
     mockSharedClient.emitSignal.mockResolvedValueOnce({ signalId: 's', duplicate: false, queued: true });
     const client = new NeurocoreClient();
     await client.sendScoreOverridden({
-      spoke: 'drek',
       briefId: 'b1',
-      before: { scope_honesty: 3 },
-      after: { scope_honesty: 4 },
+      originalScore: { visualOutcome: 3, storyPotential: 3, scopeFit: 3, audienceMatch: 3, aggregate: 3 },
+      editedScore: { visualOutcome: 4, storyPotential: 3, scopeFit: 3, audienceMatch: 3, aggregate: 3.25 },
+      axesChanged: ['visualOutcome'],
       overriddenAt: '2026-05-30T00:00:00.000Z',
     });
     expect(mockSharedClient.emitSignal).toHaveBeenCalledWith(
@@ -192,7 +214,9 @@ describe('NeurocoreClient — signal emit methods', () => {
       Object.assign(new Error('boom'), { code: 'INTERNAL', status: 500 }),
     );
     const client = new NeurocoreClient();
-    await expect(client.sendApprovedScript({ planId: 'p1' })).rejects.toBeInstanceOf(NeurocoreError);
+    await expect(
+      client.sendApprovedScript({ planId: 'p1', planMode: 'cover_letter', scenes: [] }),
+    ).rejects.toBeInstanceOf(NeurocoreError);
   });
 });
 

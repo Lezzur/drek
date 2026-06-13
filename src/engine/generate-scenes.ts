@@ -2,6 +2,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
+import { defaultLlmTimeoutMs } from './llm-timeout.js';
 import { getPlan, patchPlan } from '../db/plans.js';
 import { replaceAllScenes } from '../db/scenes.js';
 import { findLongFormDeliverable, DeliverableNotFoundError } from '../db/deliverables.js';
@@ -72,7 +73,7 @@ const v2GeneratedScenesArraySchema = z.array(v2GeneratedSceneSchema);
 interface GenerateScenesOptions {
   provider?: LLMProvider;
   db?: Firestore;
-  /** Override per-call LLM timeout. Defaults to 60s for generate-scenes. */
+  /** Override per-call LLM timeout. Defaults to env LLM_TIMEOUT_MS. */
   timeoutMs?: number;
 }
 
@@ -89,8 +90,7 @@ export async function generateScenes(
 ): Promise<GenerateScenesResult> {
   const t0 = Date.now();
   const provider = opts.provider ?? await getLLMProvider();
-  const DEFAULT_TIMEOUT_MS = 60_000;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = defaultLlmTimeoutMs(opts.timeoutMs);
 
   // ---- Load plan -------------------------------------------------------
   const plan = await getPlan(planId, opts.db);
@@ -344,6 +344,7 @@ RULES:
     formatProfile,
     audienceProfile,
     taskInstructions,
+    researchContext: plan.researchContext?.synthesis,
   });
 
   const portfolioBlock = plan.matchedProjects

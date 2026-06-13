@@ -24,6 +24,8 @@ function fakePlan(overrides: Partial<Plan> = {}): Plan {
     selectedHookVariantId: null,
     selectedTitleVariantId: null,
     selectedThumbnailConceptId: null,
+    pipelineState: 'idle' as const,
+    pipelineError: null,
     ...overrides,
   };
 }

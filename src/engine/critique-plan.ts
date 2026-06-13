@@ -19,6 +19,7 @@
 
 import { z } from 'zod';
 import { LLMProviderError, type LLMProvider } from '../providers/index.js';
+import { defaultLlmTimeoutMs } from './llm-timeout.js';
 import { extractJson } from './json-utils.js';
 import { logger } from '../logger.js';
 import {
@@ -33,7 +34,6 @@ import {
 import { filterToKnownReferences } from './llm-output-guards.js';
 import type { TransformedBuildPlan } from '../db/schemas.js';
 
-const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_RETRIES = 2;
 
 /* ─── Input ────────────────────────────────────────────────────────────── */
@@ -139,7 +139,7 @@ export async function critiquePlan(input: CritiqueInput): Promise<CritiqueResult
     let raw: string;
     try {
       raw = await provider.generate(attempt === 1 ? prompt : addRetryNudge(prompt), {
-        timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        timeoutMs: defaultLlmTimeoutMs(input.timeoutMs),
       });
     } catch (err) {
       if (err instanceof LLMProviderError) {

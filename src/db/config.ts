@@ -28,6 +28,8 @@ export async function readPollingConfig(
     lastPollAt: tsToDate(data.lastPollAt),
     pollingEnabled: data.pollingEnabled ?? DEFAULT_POLLING_CONFIG.pollingEnabled,
     pollingIntervalMs: data.pollingIntervalMs ?? DEFAULT_POLLING_CONFIG.pollingIntervalMs,
+    autoRunPipeline: data.autoRunPipeline ?? DEFAULT_POLLING_CONFIG.autoRunPipeline,
+    autoRunMaxAgeDays: data.autoRunMaxAgeDays ?? DEFAULT_POLLING_CONFIG.autoRunMaxAgeDays,
   });
 }
 

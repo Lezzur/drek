@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db/firestore.js';
 import { logger } from '../logger.js';
 import { queueDepth, deadLetterCount } from '../neurocore/write-queue.js';
+import { pipelineQueueStats } from '../engine/auto-pipeline.js';
 import { getYouTubeClient } from '../youtube/client.js';
 
 const app = new Hono();
@@ -67,6 +68,10 @@ app.get('/healthz', async (c) => {
       neurocoreDeadLetterCount: deadLetters,
       youtube: youtubeStatus,
       youtubeQuotaUtilization: Math.round(youtubeQuotaUtil * 100) / 100,
+      // Auto-pipeline: depth counts plans waiting; active means one is
+      // mid-generation right now. Soft signals, never flip to 503.
+      autoPipelineQueueDepth: pipelineQueueStats().depth,
+      autoPipelineActive: pipelineQueueStats().draining,
     },
   };
 

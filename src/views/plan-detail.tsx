@@ -114,9 +114,41 @@ const METADATA_GENERATED_OR_LATER: PlanStatus[] = [
   'metadata_generated',
 ];
 
+/** Queued/running/failed banner for the background pipeline. While the
+ *  worker is busy the page refreshes itself so scripts appear unprompted. */
+const PipelineStateBanner: FC<{ plan: Plan }> = ({ plan }) => {
+  if (plan.pipelineState === 'queued' || plan.pipelineState === 'running') {
+    return (
+      <div>
+        <div
+          id="pipeline-watch"
+          hx-get={`/plans/${plan.id}`}
+          hx-trigger="every 5s"
+          hx-target="body"
+          hx-swap="outerHTML"
+        ></div>
+        <div class="flash warn">
+          {plan.pipelineState === 'queued'
+            ? 'Queued — the background pipeline will pick this plan up shortly. This page refreshes itself.'
+            : 'Generating scripts in the background — usually a few minutes. This page refreshes itself.'}
+        </div>
+      </div>
+    );
+  }
+  if (plan.pipelineState === 'failed') {
+    return (
+      <div class="flash err">
+        Background pipeline failed: {plan.pipelineError ?? 'unknown error'} — use Generate scripts to retry.
+      </div>
+    );
+  }
+  return null;
+};
+
 const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
-  const canRunPipeline = plan.status !== 'dismissed';
-  const canFinalize = plan.status === 'scenes_generated';
+  const pipelineBusy = plan.pipelineState === 'queued' || plan.pipelineState === 'running';
+  const canRunPipeline = plan.status !== 'dismissed' && !pipelineBusy;
+  const canFinalize = plan.status === 'scenes_generated' && !pipelineBusy;
   const rerun = ['requirements_reviewed', 'projects_matched', 'scenes_generated', 'finalized', 'exported'].includes(plan.status);
 
   const showGenerateHooks =
@@ -159,14 +191,13 @@ const ActionStrip: FC<{ plan: Plan }> = ({ plan }) => {
           class="btn"
           type="button"
           disabled={!canRunPipeline}
-          hx-post={`/plans/${plan.id}/run`}
+          hx-post={`/plans/${plan.id}/queue`}
           hx-target="body"
           hx-swap="outerHTML"
-          hx-indicator="#run-indicator"
           hx-disabled-elt="this"
           hx-confirm={rerun ? 'Re-run pipeline? Existing scenes and scripts will be replaced.' : undefined}
         >
-          Run pipeline
+          {pipelineBusy ? 'Generating…' : 'Generate scripts'}
         </button>
         {showGenerateHooks ? (
           <button
@@ -464,10 +495,110 @@ const PlanHeader: FC<{ plan: Plan }> = ({ plan }) => {
   );
 };
 
+const ResearchBlock: FC<{ plan: Plan }> = ({ plan }) => {
+  if (plan.type !== 'youtube_advanced') return null;
+
+  if (!plan.researchContext) {
+    return (
+      <div class="card" style="margin-bottom:16px;">
+        <h3 class="section-label">Research</h3>
+        <div class="muted" style="font-size:13px; margin-bottom:10px;">
+          No research yet. Run research to get competitor analysis and key insights.
+        </div>
+        <button
+          class="btn secondary"
+          type="button"
+          hx-post={`/plans/${plan.id}/research`}
+          hx-target="body"
+          hx-swap="outerHTML"
+          hx-disabled-elt="this"
+          hx-indicator="#research-indicator"
+        >
+          Run Research
+        </button>
+        <span id="research-indicator" class="muted htmx-indicator" style="font-size:13px; margin-left:8px;">
+          Searching and synthesizing — this takes ~30s…
+        </span>
+      </div>
+    );
+  }
+
+  const rc = plan.researchContext;
+  const dateStr = rc.synthesizedAt instanceof Date
+    ? rc.synthesizedAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : String(rc.synthesizedAt);
+
+  return (
+    <div class="card" style="margin-bottom:16px;">
+      <div class="row" style="align-items:baseline; margin-bottom:10px;">
+        <h3 class="section-label" style="margin:0;">Research</h3>
+        <span class="muted" style="font-size:12px; margin-left:8px;">synthesized {dateStr}</span>
+        <span class="spacer" />
+        <button
+          class="btn small secondary"
+          type="button"
+          hx-post={`/plans/${plan.id}/research`}
+          hx-target="body"
+          hx-swap="outerHTML"
+          hx-disabled-elt="this"
+          hx-confirm="Re-run research? This will replace the current synthesis."
+          hx-indicator="#research-indicator"
+        >
+          Re-run
+        </button>
+        <span id="research-indicator" class="muted htmx-indicator" style="font-size:12px; margin-left:6px;">
+          Searching…
+        </span>
+      </div>
+
+      <div style="font-size:14px; color:var(--ink-2); margin-bottom:14px; line-height:1.55;">
+        {rc.synthesis}
+      </div>
+
+      {rc.keyInsights.length > 0 ? (
+        <div style="margin-bottom:12px;">
+          <div class="field-label" style="margin-bottom:6px;">Key insights</div>
+          <ul style="margin:0; padding-left:20px; font-size:13px; color:var(--ink-2); display:flex; flex-direction:column; gap:4px;">
+            {rc.keyInsights.map((insight, i) => <li key={i}>{insight}</li>)}
+          </ul>
+        </div>
+      ) : null}
+
+      {rc.competitorGaps.length > 0 ? (
+        <div style="margin-bottom:12px;">
+          <div class="field-label" style="margin-bottom:6px;">Content gaps to fill</div>
+          <ul style="margin:0; padding-left:20px; font-size:13px; color:var(--ink-2); display:flex; flex-direction:column; gap:4px;">
+            {rc.competitorGaps.map((gap, i) => <li key={i}>{gap}</li>)}
+          </ul>
+        </div>
+      ) : null}
+
+      {rc.sources.length > 0 ? (
+        <details style="margin-top:4px;">
+          <summary style="cursor:pointer; font-size:13px; color:var(--ink-3); padding:4px 0;">
+            {rc.sources.length} source{rc.sources.length === 1 ? '' : 's'}
+          </summary>
+          <ul style="margin:8px 0 0; padding-left:0; list-style:none; display:flex; flex-direction:column; gap:8px;">
+            {rc.sources.map((s, i) => (
+              <li key={i} style="font-size:13px; padding:8px; background:var(--surface-raised); border-radius:6px;">
+                <a href={s.url} target="_blank" rel="noopener noreferrer" style="color:var(--link); font-weight:500;">
+                  {s.title}
+                </a>
+                <div class="muted" style="margin-top:3px; font-size:12px;">{s.relevance}</div>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+};
+
 export const PlanDetailPage: FC<PlanDetailProps> = ({ plan, scenes, flash }) => {
   return (
     <Layout title={plan.title} flash={flash}>
       <PlanHeader plan={plan} />
+      <PipelineStateBanner plan={plan} />
       <ActionStrip plan={plan} />
       <FormatProfileSelector plan={plan} />
       <RuntimeBar targetSeconds={plan.targetRuntimeSeconds} estimatedSeconds={plan.estimatedRuntimeSeconds} />
@@ -478,6 +609,7 @@ export const PlanDetailPage: FC<PlanDetailProps> = ({ plan, scenes, flash }) => 
         </div>
       ) : null}
       <ListingContext plan={plan} />
+      <ResearchBlock plan={plan} />
       <RequirementsBlock plan={plan} />
       <MatchedProjectsBlock plan={plan} />
       <h2 style="margin: 24px 0 12px;">Scenes ({scenes.length})</h2>

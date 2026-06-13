@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
+import { defaultLlmTimeoutMs } from './llm-timeout.js';
 import { getPlan, patchPlan } from '../db/plans.js';
 import {
   findLongFormDeliverable,
@@ -43,7 +44,6 @@ import { PlanningEngineError } from './errors.js';
  */
 
 const STEP_NAME = 'extract-shorts';
-const DEFAULT_TIMEOUT_MS = 90_000;
 const MIN_CANDIDATES = 3;
 const MAX_CANDIDATES = 5;
 const MIN_REWORK_WORDS = 150; // ~60s at 150 wpm
@@ -228,7 +228,7 @@ export async function extractShortsCandidates(
 ): Promise<ExtractShortsResult> {
   const t0 = Date.now();
   const provider = opts.provider ?? (await getLLMProvider());
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = defaultLlmTimeoutMs(opts.timeoutMs);
 
   const plan = await getPlan(planId, opts.db);
   if (!plan) {

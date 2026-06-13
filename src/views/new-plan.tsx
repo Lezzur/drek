@@ -1,5 +1,7 @@
 import type { FC } from 'hono/jsx';
 import { Layout } from './layout.js';
+import type { FormatProfile } from '../engine/format-profiles/types.js';
+import type { AudienceProfile } from '../neurocore/audience-profiles.js';
 
 interface PrefilledListing {
   id?: string;
@@ -92,6 +94,117 @@ export const NewCoverLetterPlanPage: FC<NewCoverLetterFormProps> = ({
           >{v.userConstraints}</textarea>
           <div class="muted" style="font-size:12px; margin-top:4px;">
             Free text. Passed to the LLM alongside the listing.
+          </div>
+        </label>
+
+        <div class="row" style="gap:8px;">
+          <button class="btn" type="submit">Create plan</button>
+          <a class="btn secondary" href="/">Cancel</a>
+        </div>
+      </form>
+    </Layout>
+  );
+};
+
+export interface NewYoutubeAdvancedFormProps {
+  formatProfiles: FormatProfile[];
+  audienceProfiles: AudienceProfile[];
+  values?: {
+    title?: string;
+    formatProfileId?: string;
+    audienceProfileId?: string;
+    targetRuntimeSeconds?: number;
+    userConstraints?: string;
+  };
+  error?: string | null;
+}
+
+export const NewYoutubeAdvancedPlanPage: FC<NewYoutubeAdvancedFormProps> = ({
+  formatProfiles,
+  audienceProfiles,
+  values,
+  error,
+}) => {
+  const v = {
+    title: values?.title ?? '',
+    formatProfileId: values?.formatProfileId ?? formatProfiles[0]?.id ?? '',
+    audienceProfileId: values?.audienceProfileId ?? audienceProfiles[0]?.id ?? '',
+    targetRuntimeSeconds: values?.targetRuntimeSeconds ?? undefined,
+    userConstraints: values?.userConstraints ?? '',
+  };
+  return (
+    <Layout title="New YouTube Advanced plan" flash={error ? { type: 'err', message: error } : null}>
+      <h1>New YouTube Advanced plan</h1>
+      <p class="muted" style="margin-top:6px; margin-bottom:20px;">
+        Pick a format and audience profile, name the episode. DREK will run the
+        full v2 pipeline: hooks → scenes → shot list → titles → thumbnails → Shorts → publish metadata.
+      </p>
+      <form method="post" action="/plans/new/youtube-advanced" class="card">
+        <label style="display:block; margin-bottom:14px;">
+          <div class="field-label" style="margin-bottom:6px;">Episode title *</div>
+          <input
+            type="text"
+            name="title"
+            value={v.title}
+            required
+            placeholder="e.g. How I built a lead pipeline using Claude Code"
+            style="width:100%;"
+          />
+        </label>
+
+        <label style="display:block; margin-bottom:14px;">
+          <div class="field-label" style="margin-bottom:6px;">Format profile *</div>
+          <select name="formatProfileId" required style="width:100%;">
+            {formatProfiles.map((fp) => (
+              <option value={fp.id} selected={fp.id === v.formatProfileId}>
+                {fp.displayName}
+              </option>
+            ))}
+          </select>
+          <div class="muted" style="font-size:12px; margin-top:4px;">
+            {formatProfiles.find((fp) => fp.id === v.formatProfileId)?.description.slice(0, 140)}
+          </div>
+        </label>
+
+        <label style="display:block; margin-bottom:14px;">
+          <div class="field-label" style="margin-bottom:6px;">Audience profile *</div>
+          <select name="audienceProfileId" required style="width:100%;">
+            {audienceProfiles.map((ap) => (
+              <option value={ap.id} selected={ap.id === v.audienceProfileId}>
+                {ap.name}
+              </option>
+            ))}
+          </select>
+          <div class="muted" style="font-size:12px; margin-top:4px;">
+            Audience profiles are managed in Neurocore.
+          </div>
+        </label>
+
+        <label style="display:block; margin-bottom:14px;">
+          <div class="field-label" style="margin-bottom:6px;">Target runtime (seconds, optional)</div>
+          <input
+            type="number"
+            name="targetRuntimeSeconds"
+            value={v.targetRuntimeSeconds}
+            min={30}
+            max={3600}
+            placeholder="Leave blank to use format profile default"
+            style="width:220px;"
+          />
+          <div class="muted" style="font-size:12px; margin-top:4px;">
+            Defaults to the midpoint of the selected format's runtime range.
+          </div>
+        </label>
+
+        <label style="display:block; margin-bottom:14px;">
+          <div class="field-label" style="margin-bottom:6px;">Angle / constraints (optional)</div>
+          <textarea
+            name="userConstraints"
+            rows={4}
+            placeholder="e.g. focus on the orchestration layer; don't mention pricing until the outro; keep it under 25 minutes"
+          >{v.userConstraints}</textarea>
+          <div class="muted" style="font-size:12px; margin-top:4px;">
+            Free text. Injected into every LLM call alongside the format and audience profile.
           </div>
         </label>
 

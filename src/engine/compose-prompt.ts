@@ -44,6 +44,9 @@ export interface BuildSystemPromptOptions {
   formatProfile?: FormatProfile;
   audienceProfile?: AudienceProfile;
   taskInstructions: string;
+  /** Optional research synthesis text injected before task instructions.
+   *  Only meaningful on v2 paths (youtube_advanced). Ignored on v1. */
+  researchContext?: string;
 }
 
 const SEPARATOR = '\n\n---\n\n';
@@ -82,6 +85,9 @@ export function buildSystemPrompt(opts: BuildSystemPromptOptions): string {
     // v2 path — order is load-bearing: format first, then audience.
     blocks.push('=== FORMAT PROFILE ===\n' + renderFormatProfile(opts.formatProfile!));
     blocks.push('=== AUDIENCE PROFILE ===\n' + renderAudienceProfile(opts.audienceProfile!));
+    if (opts.researchContext && opts.researchContext.trim().length > 0) {
+      blocks.push('=== RESEARCH CONTEXT ===\n' + opts.researchContext);
+    }
   }
   blocks.push('=== TASK INSTRUCTIONS ===\n' + opts.taskInstructions);
   return blocks.join(SEPARATOR);

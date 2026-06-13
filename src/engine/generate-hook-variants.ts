@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
+import { defaultLlmTimeoutMs } from './llm-timeout.js';
 import { getPlan, patchPlan } from '../db/plans.js';
 import { findLongFormDeliverable, DeliverableNotFoundError } from '../db/deliverables.js';
 import { getFormatProfile, FormatProfileNotFoundError } from './format-profiles/index.js';
@@ -27,7 +28,6 @@ import { HOOK_ARCHETYPES, type HookDraft } from '../db/schemas.js';
  */
 
 const STEP_NAME = 'generate-hook-variants';
-const DEFAULT_TIMEOUT_MS = 30_000;
 
 const TASK_INSTRUCTIONS = `Generate 3-4 hook variants for the first 10-15 seconds of this episode.
 
@@ -128,7 +128,7 @@ export async function generateHookVariants(
 ): Promise<HookDraft[]> {
   const t0 = Date.now();
   const provider = opts.provider ?? (await getLLMProvider());
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = defaultLlmTimeoutMs(opts.timeoutMs);
 
   // ---- Load plan ---------------------------------------------------------
   const plan = await getPlan(planId, opts.db);
@@ -205,6 +205,7 @@ export async function generateHookVariants(
     formatProfile,
     audienceProfile,
     taskInstructions: TASK_INSTRUCTIONS,
+    researchContext: plan.researchContext?.synthesis,
   });
 
   // ---- Build user prompt -----------------------------------------------

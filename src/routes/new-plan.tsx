@@ -3,7 +3,14 @@ import { z } from 'zod';
 import { logger } from '../logger.js';
 import { createPlan } from '../db/plans.js';
 import { getListing, markListingSelected } from '../db/listings.js';
-import { NewCoverLetterPlanPage, NewYoutubePlanPage } from '../views/new-plan.js';
+import { listFormatProfiles } from '../engine/format-profiles/index.js';
+import { getAudienceProfileClient } from '../neurocore/audience-profiles.js';
+import { createYoutubeAdvancedPlanDirect } from '../intake/service.js';
+import {
+  NewCoverLetterPlanPage,
+  NewYoutubePlanPage,
+  NewYoutubeAdvancedPlanPage,
+} from '../views/new-plan.js';
 
 const app = new Hono();
 
@@ -154,6 +161,100 @@ app.post('/plans/new/youtube', async (c) => {
       <NewYoutubePlanPage
         values={{
           title: parsed.data.title,
+          targetRuntimeSeconds: parsed.data.targetRuntimeSeconds,
+          userConstraints: parsed.data.userConstraints,
+        }}
+        error={`Failed to create plan: ${(err as Error).message}`}
+      />,
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// YouTube Advanced
+// ---------------------------------------------------------------------------
+
+const youtubeAdvancedCreate = z.object({
+  title: z.string().min(1, 'title is required'),
+  formatProfileId: z.string().min(1, 'format profile is required'),
+  audienceProfileId: z.string().min(1, 'audience profile is required'),
+  targetRuntimeSeconds: RUNTIME.optional(),
+  userConstraints: z.string().optional(),
+});
+
+app.get('/plans/new/youtube-advanced', async (c) => {
+  const formatProfiles = listFormatProfiles();
+  let audienceProfiles: Awaited<ReturnType<ReturnType<typeof getAudienceProfileClient>['list']>> = [];
+  let listError: string | null = null;
+  try {
+    audienceProfiles = await getAudienceProfileClient().list();
+  } catch (err) {
+    listError = `Could not load audience profiles from Neurocore: ${(err as Error).message}`;
+    logger.warn({ err: (err as Error).message }, 'new-plan: audience profile list failed');
+  }
+  return c.html(
+    <NewYoutubeAdvancedPlanPage
+      formatProfiles={formatProfiles}
+      audienceProfiles={audienceProfiles}
+      error={listError}
+    />,
+  );
+});
+
+app.post('/plans/new/youtube-advanced', async (c) => {
+  const form = await c.req.formData();
+  const raw = Object.fromEntries(form) as Record<string, string>;
+  const parsed = youtubeAdvancedCreate.safeParse({
+    ...raw,
+    targetRuntimeSeconds: raw.targetRuntimeSeconds || undefined,
+  });
+
+  const formatProfiles = listFormatProfiles();
+  let audienceProfiles: Awaited<ReturnType<ReturnType<typeof getAudienceProfileClient>['list']>> = [];
+  try {
+    audienceProfiles = await getAudienceProfileClient().list();
+  } catch {
+    // Continue — validation error will surface before we need the list.
+  }
+
+  if (!parsed.success) {
+    return c.html(
+      <NewYoutubeAdvancedPlanPage
+        formatProfiles={formatProfiles}
+        audienceProfiles={audienceProfiles}
+        values={{
+          title: raw.title,
+          formatProfileId: raw.formatProfileId,
+          audienceProfileId: raw.audienceProfileId,
+          targetRuntimeSeconds: Number(raw.targetRuntimeSeconds) || undefined,
+          userConstraints: raw.userConstraints,
+        }}
+        error={parsed.error.errors[0]?.message ?? 'invalid input'}
+      />,
+      400,
+    );
+  }
+
+  try {
+    const { planId } = await createYoutubeAdvancedPlanDirect({
+      title: parsed.data.title,
+      formatProfileId: parsed.data.formatProfileId,
+      audienceProfileId: parsed.data.audienceProfileId,
+      targetRuntimeSeconds: parsed.data.targetRuntimeSeconds,
+      userConstraints: parsed.data.userConstraints ?? null,
+    });
+    return c.redirect(`/plans/${planId}`, 303);
+  } catch (err) {
+    logger.error({ err: (err as Error).message }, 'youtube-advanced plan direct-create failed');
+    return c.html(
+      <NewYoutubeAdvancedPlanPage
+        formatProfiles={formatProfiles}
+        audienceProfiles={audienceProfiles}
+        values={{
+          title: parsed.data.title,
+          formatProfileId: parsed.data.formatProfileId,
+          audienceProfileId: parsed.data.audienceProfileId,
           targetRuntimeSeconds: parsed.data.targetRuntimeSeconds,
           userConstraints: parsed.data.userConstraints,
         }}

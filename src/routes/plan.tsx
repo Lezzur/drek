@@ -14,10 +14,12 @@ import { generateThumbnailConcepts } from '../engine/generate-thumbnail-concepts
 import { generatePublishMetadata } from '../engine/generate-publish-metadata.js';
 import { findLongFormDeliverable } from '../db/deliverables.js';
 import { runPipeline } from '../engine/pipeline.js';
+import { enqueuePipeline } from '../engine/auto-pipeline.js';
 import { PlanningEngineError } from '../engine/errors.js';
 import { changePlanFormatProfile } from '../engine/change-format.js';
 import { getNeurocoreClient } from '../neurocore/index.js';
 import { withPlanLock } from '../lib/plan-locks.js';
+import { runResearch } from '../research/research-service.js';
 
 const app = new Hono();
 
@@ -79,6 +81,28 @@ app.post('/plans/:id/run', async (c) => {
     });
   } catch (err) {
     return renderPlanPage(c, id, errorToFlash(err, 'pipeline'));
+  }
+});
+
+/**
+ * POST /plans/:id/queue — non-blocking pipeline run. Hands the plan to
+ * the auto-pipeline worker and returns immediately; the plan page (and
+ * dashboard) poll the queued/running state and refresh themselves. This
+ * replaced the blocking /run button in the UI — /run stays for direct
+ * API use and tests.
+ */
+app.post('/plans/:id/queue', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const enqueued = await enqueuePipeline(id, { client: getNeurocoreClient() });
+    return renderPlanPage(c, id, {
+      type: enqueued ? 'ok' : 'warn',
+      message: enqueued
+        ? 'Queued — scripts are being generated in the background. This page refreshes itself.'
+        : 'Not queued: the plan is already in the pipeline or past the point of running it.',
+    });
+  } catch (err) {
+    return renderPlanPage(c, id, errorToFlash(err, 'queue pipeline'));
   }
 });
 
@@ -286,6 +310,25 @@ app.post('/plans/:id/select-hook', async (c) => {
     }
     logger.error({ planId: id, err: (err as Error).message }, 'select-hook: unexpected error');
     return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } }, 500);
+  }
+});
+
+/**
+ * POST /plans/:id/research — Exa.ai search + LLM synthesis ("Call 12").
+ * Runs synchronously (30-60s) then re-renders the plan page with a flash.
+ * Only available for youtube_advanced plans. On completion, persists
+ * plan.researchContext and re-renders so the research block appears.
+ */
+app.post('/plans/:id/research', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const result = await runResearch(id);
+    return renderPlanPage(c, id, {
+      type: 'ok',
+      message: `Research complete — ${result.keyInsights.length} insights, ${result.sources.length} sources.`,
+    });
+  } catch (err) {
+    return renderPlanPage(c, id, errorToFlash(err, 'research'));
   }
 });
 

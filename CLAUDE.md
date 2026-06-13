@@ -2,6 +2,23 @@
 
 AI video director — pre-production planning and scene scripting.
 
+## Auto-pipeline (the thing that makes DREK useful)
+
+New plans polled from Neurocore run the full LLM pipeline **automatically in
+the background** (`src/engine/auto-pipeline.ts`) — the dashboard shows
+finished scripts, not raw listings. Serial in-process queue; state lives on
+the Plan doc (`pipelineState`: idle/queued/running/failed) so crashes recover
+on boot (`recoverAndBackfill()` in index.ts). Config: `autoRunPipeline` +
+`autoRunMaxAgeDays` ("fresh window") on `config/polling`, editable in
+Settings. Queue depth is on `/healthz` (`autoPipelineQueueDepth`/`Active`).
+
+⚠️ **LLM timeouts:** every engine step defaults to env `LLM_TIMEOUT_MS`
+(via `src/engine/llm-timeout.ts`), currently 180s. Do NOT reintroduce
+per-step hardcoded defaults — the original 60s default on scene generation
+(a call that empirically needs 80-145s through the Claude CLI) meant the
+v1 pipeline had NEVER completed in a month of production (1 plan with
+scenes out of 67, 2026-06-11 audit).
+
 ## Service
 
 - **URL:** http://localhost:3003/

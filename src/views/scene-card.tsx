@@ -1,5 +1,6 @@
 import type { FC } from 'hono/jsx';
 import type { Scene } from '../db/schemas.js';
+import { SCENE_INTERFACE_TYPES, SHOT_ITEM_SOURCES } from '../db/schemas.js';
 
 /**
  * Scene card — the unit of the M8 plan-detail UI. Rendered as a full card on
@@ -195,7 +196,7 @@ export const SceneCard: FC<SceneCardProps> = ({
         {scene.projectRef ? (
           <div class="scene-project-ref">project: <code>{scene.projectRef}</code></div>
         ) : null}
-        <ShotListBlock scene={scene} />
+        <ShotListBlock planId={planId} scene={scene} />
       </div>
 
       <div style="padding-top:2px;">
@@ -215,15 +216,14 @@ export const SceneCard: FC<SceneCardProps> = ({
 };
 
 /**
- * Read-only shot list section for v2 scenes. Renders only when the scene
- * has at least one shot-list field populated (i.e., generate-shot-list
- * has run for this plan). Wraps everything in a <details> for collapse,
- * defaulting open the first time but Rick can close it.
+ * Shot list section for v2 scenes. Exported so the shot-edit route endpoints
+ * can return it as an HTMX partial. Renders only when the scene has at least
+ * one shot-list field populated.
  *
- * Inline editing of individual shot items is deferred to a future polish
- * pass — for now Rick edits via the JSON-shaped fields if needed (rare).
+ * primaryShot and brollItems are editable inline. shotListItems, cutPoints,
+ * and onScreenTextOverlays are read-only (auto-generated, rarely hand-edited).
  */
-const ShotListBlock: FC<{ scene: Scene }> = ({ scene }) => {
+export const ShotListBlock: FC<{ planId: string; scene: Scene }> = ({ planId, scene }) => {
   const hasShotData =
     scene.primaryShot !== null ||
     scene.brollItems.length > 0 ||
@@ -233,8 +233,12 @@ const ShotListBlock: FC<{ scene: Scene }> = ({ scene }) => {
 
   if (!hasShotData) return null;
 
+  const shotUrl = (suffix: string) => `/plans/${planId}/scenes/${scene.id}/shots${suffix}`;
+  const blockId = `shot-block-${scene.id}`;
+  const target = `#${blockId}`;
+
   return (
-    <details class="shot-list-block" open>
+    <details class="shot-list-block" open id={blockId}>
       <summary
         style="cursor:pointer;font-weight:600;font-size:13px;color:var(--ink-2);margin-top:12px;padding-top:8px;border-top:1px dashed var(--border-soft);"
       >
@@ -242,31 +246,104 @@ const ShotListBlock: FC<{ scene: Scene }> = ({ scene }) => {
         {scene.beatTag ? <span class="muted"> · beat: {scene.beatTag}</span> : null}
       </summary>
       <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+
+        {/* Primary shot — editable type + description */}
         {scene.primaryShot ? (
           <div>
-            <div class="field-label">Primary shot</div>
-            <div style="font-size:13px;color:var(--ink-2);">
-              <span class="tag" style="margin-right:6px;">{scene.primaryShot.type}</span>
-              {scene.primaryShot.description}
-            </div>
+            <div class="field-label" style="margin-bottom:4px;">Primary shot</div>
+            <form
+              hx-patch={shotUrl('/primary')}
+              hx-target={target}
+              hx-swap="outerHTML"
+              hx-trigger="change from:select, blur from:input delay:300ms"
+              style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"
+            >
+              <select name="type" style="font-size:12px;padding:2px 4px;border-radius:4px;background:var(--surface-raised);color:var(--ink-2);border:1px solid var(--border);">
+                {SCENE_INTERFACE_TYPES.map((t) => (
+                  <option value={t} selected={t === scene.primaryShot!.type}>{t}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                name="description"
+                value={scene.primaryShot.description}
+                style="flex:1;font-size:13px;min-width:200px;background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--ink-2);padding:2px 0;"
+              />
+            </form>
           </div>
         ) : null}
 
-        {scene.brollItems.length > 0 ? (
-          <div>
-            <div class="field-label">B-roll · {scene.brollItems.length}</div>
-            <ul style="margin:4px 0 0;padding-left:20px;font-size:13px;color:var(--ink-2);">
+        {/* B-roll — editable descriptions, add/remove */}
+        <div>
+          <div class="field-label" style="margin-bottom:4px;">
+            B-roll{scene.brollItems.length > 0 ? ` · ${scene.brollItems.length}` : ''}
+          </div>
+          {scene.brollItems.length > 0 ? (
+            <ul style="margin:0 0 8px;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:4px;">
               {scene.brollItems.map((b, i) => (
-                <li key={i}>
-                  <span class="tag" style="margin-right:6px;">{b.type}</span>
-                  {b.description}
-                  <span class="muted" style="font-size:12px;"> · {b.durationSeconds}s · {b.source}</span>
+                <li key={i} style="display:flex;gap:6px;align-items:center;font-size:13px;">
+                  <span class="tag" style="flex-shrink:0;">{b.type}</span>
+                  <form
+                    hx-patch={shotUrl(`/broll/${i}`)}
+                    hx-target={target}
+                    hx-swap="outerHTML"
+                    hx-trigger="blur from:input delay:300ms"
+                    style="flex:1;display:flex;"
+                  >
+                    <input
+                      type="text"
+                      name="description"
+                      value={b.description}
+                      style="flex:1;font-size:13px;background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--ink-2);padding:2px 0;"
+                    />
+                  </form>
+                  <span class="muted" style="font-size:12px;flex-shrink:0;">{b.durationSeconds}s</span>
+                  <button
+                    type="button"
+                    hx-delete={shotUrl(`/broll/${i}`)}
+                    hx-target={target}
+                    hx-swap="outerHTML"
+                    style="background:none;border:none;color:var(--ink-4);cursor:pointer;padding:0 2px;font-size:13px;line-height:1;"
+                    title="Remove b-roll item"
+                  >✕</button>
                 </li>
               ))}
             </ul>
-          </div>
-        ) : null}
+          ) : null}
+          {/* Add b-roll form */}
+          <form
+            hx-post={shotUrl('/broll')}
+            hx-target={target}
+            hx-swap="outerHTML"
+            style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;"
+          >
+            <select name="type" style="font-size:12px;padding:2px 4px;border-radius:4px;background:var(--surface-raised);color:var(--ink-2);border:1px solid var(--border);">
+              {SCENE_INTERFACE_TYPES.map((t) => <option value={t}>{t}</option>)}
+            </select>
+            <input
+              type="text"
+              name="description"
+              required
+              placeholder="B-roll description"
+              style="flex:1;font-size:13px;min-width:160px;"
+            />
+            <input
+              type="number"
+              name="durationSeconds"
+              value={10}
+              min={1}
+              max={600}
+              style="width:54px;font-size:13px;"
+            />
+            <span class="muted" style="font-size:12px;">s</span>
+            <select name="source" style="font-size:12px;padding:2px 4px;border-radius:4px;background:var(--surface-raised);color:var(--ink-2);border:1px solid var(--border);">
+              {SHOT_ITEM_SOURCES.map((s) => <option value={s}>{s.replace(/_/g, ' ')}</option>)}
+            </select>
+            <button type="submit" class="btn small" style="font-size:12px;padding:3px 8px;">＋ Add</button>
+          </form>
+        </div>
 
+        {/* Shot list items — read-only */}
         {scene.shotListItems.length > 0 ? (
           <div>
             <div class="field-label">Shot list items · {scene.shotListItems.length}</div>
@@ -282,6 +359,7 @@ const ShotListBlock: FC<{ scene: Scene }> = ({ scene }) => {
           </div>
         ) : null}
 
+        {/* On-screen text — read-only */}
         {scene.onScreenTextOverlays.length > 0 ? (
           <div>
             <div class="field-label">On-screen text · {scene.onScreenTextOverlays.length}</div>
@@ -296,6 +374,7 @@ const ShotListBlock: FC<{ scene: Scene }> = ({ scene }) => {
           </div>
         ) : null}
 
+        {/* Cut points — read-only */}
         {scene.cutPoints.length > 0 ? (
           <div>
             <div class="field-label">Cut points · {scene.cutPoints.length}</div>

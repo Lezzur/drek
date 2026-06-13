@@ -64,6 +64,12 @@ export type MatchedProject = z.infer<typeof matchedProjectSchema>;
 const MIN_RUNTIME = 30;
 const MAX_RUNTIME = 3_600;
 
+/** Background-pipeline lifecycle for a plan. Orthogonal to `status` —
+ *  `status` is how far the content has progressed; `pipelineState` is
+ *  whether the auto-pipeline worker is (or failed while) advancing it. */
+export const PIPELINE_STATES = ['idle', 'queued', 'running', 'failed'] as const;
+export type PipelineState = (typeof PIPELINE_STATES)[number];
+
 /** A Plan document, validated for both reads and writes. createdAt/updatedAt
  *  arrive from Firestore as `Timestamp` objects; the calling code converts
  *  them to Date before/after the schema.
@@ -101,6 +107,26 @@ export const planSchema = z.object({
   selectedTitleVariantId: z.string().nullable().default(null),
   /** Selected ThumbnailConcept id on the long-form Deliverable. */
   selectedThumbnailConceptId: z.string().nullable().default(null),
+  // ---- auto-pipeline additive fields --------------------------------------
+  /** Background pipeline lifecycle. Existing docs default to 'idle'. */
+  pipelineState: z.enum(PIPELINE_STATES).default('idle'),
+  /** Last pipeline failure message; null when idle/queued/running. */
+  pipelineError: z.string().nullable().default(null),
+  // ---- research additive field --------------------------------------------
+  /** Exa.ai + LLM-synthesized research context. Null until "Run Research"
+   *  is clicked on the plan detail page. Only populated for youtube_advanced;
+   *  v1 plan types leave this null. */
+  researchContext: z.object({
+    synthesis: z.string(),
+    keyInsights: z.array(z.string()),
+    competitorGaps: z.array(z.string()),
+    sources: z.array(z.object({
+      url: z.string(),
+      title: z.string(),
+      relevance: z.string(),
+    })),
+    synthesizedAt: z.date(),
+  }).nullable().default(null),
 });
 export type Plan = z.infer<typeof planSchema>;
 
@@ -148,6 +174,19 @@ export const planPatchSchema = z
     selectedHookVariantId: z.string().nullable(),
     selectedTitleVariantId: z.string().nullable(),
     selectedThumbnailConceptId: z.string().nullable(),
+    pipelineState: z.enum(PIPELINE_STATES),
+    pipelineError: z.string().nullable(),
+    researchContext: z.object({
+      synthesis: z.string(),
+      keyInsights: z.array(z.string()),
+      competitorGaps: z.array(z.string()),
+      sources: z.array(z.object({
+        url: z.string(),
+        title: z.string(),
+        relevance: z.string(),
+      })),
+      synthesizedAt: z.date(),
+    }).nullable(),
   })
   .partial();
 export type PlanPatch = z.infer<typeof planPatchSchema>;
@@ -357,6 +396,14 @@ export const pollingConfigSchema = z.object({
     .int()
     .min(MIN_POLL_INTERVAL_MS)
     .default(DEFAULT_POLL_INTERVAL_MS),
+  /** When true, newly polled cover-letter plans are queued through the
+   *  full LLM pipeline automatically — scripts are ready when Rick opens
+   *  the dashboard instead of requiring a click-and-wait per plan. */
+  autoRunPipeline: z.boolean().default(true),
+  /** "Fresh window" in days. Listings older than this are considered dead:
+   *  they're never auto-run, and the dashboard groups them under Stale
+   *  with a bulk-dismiss. Cover-letter listings decay fast (PRD §5.3). */
+  autoRunMaxAgeDays: z.number().int().min(1).max(30).default(3),
 });
 export type PollingConfig = z.infer<typeof pollingConfigSchema>;
 
@@ -364,6 +411,8 @@ export const DEFAULT_POLLING_CONFIG: PollingConfig = {
   lastPollAt: null,
   pollingEnabled: true,
   pollingIntervalMs: DEFAULT_POLL_INTERVAL_MS,
+  autoRunPipeline: true,
+  autoRunMaxAgeDays: 3,
 };
 
 // ===========================================================================

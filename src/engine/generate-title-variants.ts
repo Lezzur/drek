@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
+import { defaultLlmTimeoutMs } from './llm-timeout.js';
 import { getPlan, patchPlan } from '../db/plans.js';
 import {
   getDeliverable,
@@ -36,7 +37,6 @@ import {
  */
 
 const STEP_NAME = 'generate-title-variants';
-const DEFAULT_TIMEOUT_MS = 30_000;
 
 const TASK_INSTRUCTIONS = `Generate 5-10 title variants for this YouTube deliverable.
 
@@ -158,7 +158,7 @@ export async function generateTitleVariants(
 ): Promise<GenerateTitleVariantsResult> {
   const t0 = Date.now();
   const provider = opts.provider ?? (await getLLMProvider());
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = defaultLlmTimeoutMs(opts.timeoutMs);
 
   // ---- Load deliverable + parent plan -----------------------------------
 
@@ -249,6 +249,7 @@ export async function generateTitleVariants(
     formatProfile,
     audienceProfile,
     taskInstructions: TASK_INSTRUCTIONS,
+    researchContext: plan.researchContext?.synthesis,
   });
 
   // Episode plan summary for context. Parse the encoded structured output

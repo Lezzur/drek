@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { logger } from '../logger.js';
 import { getLLMProvider, LLMProviderError, type LLMProvider } from '../providers/index.js';
+import { defaultLlmTimeoutMs } from './llm-timeout.js';
 import { getPlan, patchPlan } from '../db/plans.js';
 import { listScenes, patchScene } from '../db/scenes.js';
 import {
@@ -38,7 +39,6 @@ import {
  */
 
 const STEP_NAME = 'generate-shot-list';
-const DEFAULT_TIMEOUT_MS = 60_000; // Per tech-spec §7 — batched call is larger
 const MAX_SCRIPTS_CHARS = 60_000;  // Defensive cap on combined scripts
 
 const TASK_INSTRUCTIONS = `Generate the per-scene shot list for an entire video plan in ONE batched response.
@@ -232,7 +232,7 @@ export async function generateShotList(
 ): Promise<GenerateShotListResult> {
   const t0 = Date.now();
   const provider = opts.provider ?? (await getLLMProvider());
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = defaultLlmTimeoutMs(opts.timeoutMs);
 
   // ---- Load plan + pre-conditions ---------------------------------------
 

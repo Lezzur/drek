@@ -9,6 +9,7 @@ import {
 import { createPlan, findPlanByListing } from '../db/plans.js';
 import { upsertListing } from '../db/listings.js';
 import { readPollingConfig, recordPoll } from '../db/config.js';
+import { enqueuePipeline } from '../engine/auto-pipeline.js';
 import { getEnv } from '../env.js';
 
 /**
@@ -43,6 +44,8 @@ export interface PollCycleResult {
   fetched: number;
   /** Listings that became new plans. */
   createdPlans: number;
+  /** New plans handed to the auto-pipeline queue (autoRunPipeline on). */
+  queuedPipelines: number;
   /** Listings that already had a plan and were skipped (still acked). */
   skipped: number;
   /** Listings that hit an error during processing. */
@@ -72,6 +75,7 @@ export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleRes
     return {
       fetched: 0,
       createdPlans: 0,
+      queuedPipelines: 0,
       skipped: 0,
       failed: 0,
       acked: 0,
@@ -89,6 +93,7 @@ export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleRes
       return {
         fetched: 0,
         createdPlans: 0,
+        queuedPipelines: 0,
         skipped: 0,
         failed: 0,
         acked: 0,
@@ -110,6 +115,7 @@ export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleRes
         return {
           fetched: 0,
           createdPlans: 0,
+          queuedPipelines: 0,
           skipped: 0,
           failed: 0,
           acked: 0,
@@ -121,16 +127,36 @@ export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleRes
     }
 
     let createdPlans = 0;
+    let queuedPipelines = 0;
     let skipped = 0;
     let failed = 0;
     let acked = 0;
 
     for (const listing of listings) {
-      let processed: 'created' | 'skipped' | null = null;
+      let processed: ProcessOutcome | null = null;
       try {
         processed = await processListing(listing, opts.db);
-        if (processed === 'created') createdPlans++;
-        else if (processed === 'skipped') skipped++;
+        if (processed.outcome === 'created') {
+          createdPlans++;
+          // Hand the fresh plan to the background pipeline so the script
+          // is ready by the time Rick looks at the dashboard. Best-effort:
+          // an enqueue failure must not fail the listing (it's already
+          // persisted); boot backfill will pick it up later.
+          if (cfg.autoRunPipeline) {
+            try {
+              const enqueued = await enqueuePipeline(processed.planId, {
+                ...(opts.db ? { db: opts.db } : {}),
+                ...(opts.client ? { client: opts.client } : {}),
+              });
+              if (enqueued) queuedPipelines++;
+            } catch (enqueueErr) {
+              logger.warn(
+                { planId: processed.planId, err: (enqueueErr as Error).message },
+                'poll cycle: auto-pipeline enqueue failed (plan persisted, will backfill on boot)',
+              );
+            }
+          }
+        } else if (processed.outcome === 'skipped') skipped++;
       } catch (err) {
         failed++;
         logger.warn(
@@ -159,12 +185,13 @@ export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleRes
     await recordPoll(opts.db);
     const durationMs = Date.now() - t0;
     logger.info(
-      { fetched: listings.length, createdPlans, skipped, failed, acked, durationMs },
+      { fetched: listings.length, createdPlans, queuedPipelines, skipped, failed, acked, durationMs },
       'poll cycle complete',
     );
     return {
       fetched: listings.length,
       createdPlans,
+      queuedPipelines,
       skipped,
       failed,
       acked,
@@ -180,10 +207,12 @@ export async function runPollCycle(opts: PollOptions = {}): Promise<PollCycleRes
 // Internals
 // ---------------------------------------------------------------------------
 
+type ProcessOutcome = { outcome: 'created'; planId: string } | { outcome: 'skipped' };
+
 async function processListing(
   listing: PendingListing,
   db?: Firestore,
-): Promise<'created' | 'skipped'> {
+): Promise<ProcessOutcome> {
   if (!listing.listingId) {
     // Should never happen given Gap 5's schema, but guard anyway.
     throw new Error('listing has no listingId');
@@ -196,13 +225,13 @@ async function processListing(
       { listingId: listing.listingId, planId: existing.id },
       'plan already exists for listing; skipping create',
     );
-    return 'skipped';
+    return { outcome: 'skipped' };
   }
 
   const title = buildPlanTitle(listing);
   const listingText = listing.listingText ?? listing.videoRequirements;
 
-  await createPlan(
+  const plan = await createPlan(
     {
       type: 'cover_letter',
       title,
@@ -229,7 +258,7 @@ async function processListing(
     db,
   );
 
-  return 'created';
+  return { outcome: 'created', planId: plan.id };
 }
 
 function buildPlanTitle(listing: PendingListing): string {

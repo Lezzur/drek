@@ -24,6 +24,8 @@ function fakePlan(overrides: Partial<Plan> = {}): Plan {
     selectedHookVariantId: null,
     selectedTitleVariantId: null,
     selectedThumbnailConceptId: null,
+    pipelineState: 'idle' as const,
+    pipelineError: null,
     ...overrides,
   };
 }
@@ -165,15 +167,40 @@ describe('PlanDetailPage', () => {
     expect(html).not.toContain('1. Analyze requirements');
   });
 
-  it('shows the Run pipeline button on a plan in awaiting_review', () => {
-    // The three separate per-step buttons (Analyze / Match / Generate scenes)
-    // collapsed into a single "Run pipeline" action in v2. Disabled-ness is
-    // driven by status; here we just confirm the button renders.
+  it('shows the Generate scripts button on a plan in awaiting_review', () => {
+    // The blocking "Run pipeline" button became a non-blocking enqueue:
+    // it posts to /queue and the page polls pipelineState until done.
     const html = toHtml(
       PlanDetailPage({ plan: fakePlan({ status: 'awaiting_review' }), scenes: [] }),
     );
-    expect(html).toContain('Run pipeline');
-    expect(html).toContain('hx-post="/plans/plan_1/run"');
+    expect(html).toContain('Generate scripts');
+    expect(html).toContain('hx-post="/plans/plan_1/queue"');
+  });
+
+  it('shows the busy banner and self-refresh while the pipeline runs', () => {
+    const html = toHtml(
+      PlanDetailPage({
+        plan: fakePlan({ status: 'awaiting_review', pipelineState: 'running' }),
+        scenes: [],
+      }),
+    );
+    expect(html).toContain('Generating scripts in the background');
+    expect(html).toContain('hx-trigger="every 5s"');
+  });
+
+  it('shows the failure banner with the error when the pipeline failed', () => {
+    const html = toHtml(
+      PlanDetailPage({
+        plan: fakePlan({
+          status: 'awaiting_review',
+          pipelineState: 'failed',
+          pipelineError: 'claude CLI failed: timeout',
+        }),
+        scenes: [],
+      }),
+    );
+    expect(html).toContain('Background pipeline failed');
+    expect(html).toContain('claude CLI failed: timeout');
   });
 });
 

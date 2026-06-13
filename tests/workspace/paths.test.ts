@@ -138,7 +138,9 @@ describe('resolvePlanWorkspacePath', () => {
 });
 
 describe('resolveSubdirPath', () => {
-  const workspace = '/tmp/drek-workspace-test/plan_abc-ep';
+  // resolve() so the expected values are drive-qualified on Windows the same
+  // way the implementation's path.resolve output is.
+  const workspace = path.resolve('/tmp/drek-workspace-test/plan_abc-ep');
 
   it.each(ALLOWED_SUBDIRS)('accepts %s', (sub) => {
     const p = resolveSubdirPath(workspace, sub);
